@@ -13,3 +13,26 @@ val AuraGold = Color(0xFFFFD54F)
 val ErrorRed = Color(0xFFFF5252)
 val TextPrimary = Color(0xFFE0E0E0)
 val TextSecondary = Color(0xFF9E9E9E)
+val AuraWhiteHot = Color(0xFFFFF8E1)
+
+/** Map a server-assigned palette string to its Compose [Color]. */
+fun paletteColor(palette: String?): Color = when (palette?.lowercase()) {
+    "cyan"    -> CyanAccent
+    "magenta" -> AuraMagenta
+    "gold"    -> AuraGold
+    "green"   -> NeonGreen
+    "purple"  -> AuraPurple
+    "orange"  -> OrangeWarning
+    else      -> CyanAccent
+}
+
+/** Pick an effect colour from a scan result classification. */
+fun resultColor(classification: String?): Color = when (classification) {
+    "AURA OVERFLOW"              -> AuraWhiteHot
+    "NEGATIVE AURA SINGULARITY"  -> AuraPurple
+    "MILESTONE SIGNAL"           -> AuraGold
+    "EXTREME FIELD"              -> ErrorRed
+    "RADIANT"                    -> NeonGreen
+    "VOID-ADJACENT"              -> AuraPurple
+    else                         -> NeonGreen
+}

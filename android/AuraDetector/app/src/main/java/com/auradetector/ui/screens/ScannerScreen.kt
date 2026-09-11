@@ -33,7 +33,13 @@ import androidx.camera.view.PreviewView
 import androidx.camera.view.transform.CoordinateTransform
 import androidx.camera.view.transform.ImageProxyTransformFactory
 import androidx.camera.view.transform.OutputTransform
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -41,10 +47,16 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
@@ -52,6 +64,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -65,6 +78,8 @@ import androidx.compose.ui.geometry.Rect as ComposeRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
@@ -84,11 +99,14 @@ import com.auradetector.transport.VisionFrameState
 import com.auradetector.transport.VisionPoint
 import com.auradetector.transport.VisionProfile
 import com.auradetector.transport.VisionLinkState
+import com.auradetector.ui.theme.AuraWhiteHot
 import com.auradetector.ui.theme.CyanAccent
 import com.auradetector.ui.theme.DarkNavy
 import com.auradetector.ui.theme.ErrorRed
 import com.auradetector.ui.theme.NeonGreen
 import com.auradetector.ui.theme.OrangeWarning
+import com.auradetector.ui.theme.paletteColor
+import com.auradetector.ui.theme.resultColor
 import java.io.ByteArrayOutputStream
 import java.text.NumberFormat
 import java.util.Locale
@@ -136,9 +154,61 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
     var soundEnabled by remember { mutableStateOf(true) }
     val latestSoundEnabled = rememberUpdatedState(soundEnabled)
     val feedback = remember(context) { ScanFeedback(context) }
+
+    val particleSystem = remember { ParticleSystem() }
+    var particleTick by remember { mutableIntStateOf(0) }
+    val scanPulseProgress = remember { Animatable(0f) }
+    val transition = rememberInfiniteTransition(label = "breathe")
+    val breatheAlpha by transition.animateFloat(
+        initialValue = 0.6f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1250, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "breatheAlpha"
+    )
+    val scanPulseColor = scanResult?.classification?.let { resultColor(it) } ?: NeonGreen
+
     DisposableEffect(feedback) {
         onDispose { feedback.release() }
     }
+
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            particleSystem.update(0.05f)
+            particleTick++
+            delay(50)
+        }
+    }
+
+    LaunchedEffect(selectedSubjectId, soundEnabled) {
+        if (selectedSubjectId == null || !soundEnabled) return@LaunchedEffect
+        while (isActive) {
+            val currentReading = liveReading
+            if (currentReading != null) {
+                val aurStr = currentReading.replace(",", "").replace(" AUR/s", "").trim()
+                val aurVal = aurStr.toLongOrNull() ?: 0L
+                val delayMs = when {
+                    aurVal == 0L -> -1L
+                    aurVal <= 100 -> 700L
+                    aurVal <= 500 -> 400L
+                    aurVal <= 5000 -> 200L
+                    aurVal <= 50000 -> 100L
+                    else -> 50L
+                }
+                if (delayMs > 0) {
+                    feedback.geigerTick(soundEnabled)
+                    delay(delayMs)
+                } else {
+                    delay(100)
+                }
+            } else {
+                delay(100)
+            }
+        }
+    }
+
     LaunchedEffect(frameState) {
         if (selectedSubjectId != null && frameState?.subjects?.none { it.id == selectedSubjectId } != false) {
             selectedSubjectId = null
@@ -162,7 +232,6 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
                 delay(160)
             }
         } catch (_: CancellationException) {
-            // Selection changes cancel the old local reading loop.
         } finally {
             liveReading = null
         }
@@ -192,7 +261,20 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
         }
     }
     LaunchedEffect(scanResult) {
-        if (scanResult != null) feedback.scanCompleted(latestSoundEnabled.value)
+        if (scanResult != null) {
+            feedback.scanCompleted(latestSoundEnabled.value)
+            
+            val projected = frameState?.let { projectSubjects(it) }?.firstOrNull { it.subject.id == scanningSubjectId }
+            val cx = projected?.box?.center?.x ?: 500f
+            val cy = projected?.box?.center?.y ?: 500f
+            val color = scanResult?.classification?.let { resultColor(it) } ?: NeonGreen
+            particleSystem.burst(cx, cy, 25, color)
+
+            scanPulseProgress.snapTo(0f)
+            scanPulseProgress.animateTo(1f, tween(900))
+        } else {
+            scanPulseProgress.snapTo(0f)
+        }
     }
     DisposableEffect(transport) {
         transport.connect()
@@ -205,6 +287,12 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
             frameState = frameState,
             selectedSubjectId = selectedSubjectId,
             liveReading = liveReading,
+            breatheAlpha = breatheAlpha,
+            particleSystem = particleSystem,
+            particleTick = particleTick,
+            scanPulseProgress = scanPulseProgress.value,
+            scanPulseColor = scanPulseColor,
+            scanningSubjectId = scanningSubjectId,
             onSelectSubject = {
                 if (selectedSubjectId != it) {
                     scanningSubjectId = null
@@ -223,6 +311,11 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
             progress = scanProgress,
             result = scanResult
         )
+        
+        val subjectCount = frameState?.subjects?.size ?: 0
+        val selectedSubjectProfile = frameState?.subjects?.firstOrNull { it.id == selectedSubjectId }?.profile
+        val hudSubjectColor = selectedSubjectProfile?.palette?.let { paletteColor(it) } ?: NeonGreen
+
         ScannerHud(
             status = status,
             selectedSubjectId = selectedSubjectId,
@@ -234,6 +327,8 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
                 else -> null
             },
             soundEnabled = soundEnabled,
+            subjectCount = subjectCount,
+            subjectColor = hudSubjectColor,
             onToggleSound = { soundEnabled = !soundEnabled },
             onExit = onExit
         )
@@ -251,8 +346,6 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
     val imageTransformFactory = remember {
         ImageProxyTransformFactory().apply {
             setUsingCropRect(true)
-            // toJpeg applies this same ImageProxy rotation before the server sees pixels.
-            // The returned server coordinates are therefore in the rotated JPEG space.
             setUsingRotationDegrees(true)
         }
     }
@@ -309,7 +402,6 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
                                 )
                             }
                         } catch (error: Exception) {
-                            // A transient CameraX transform/frame failure must not terminate the scanner process.
                             Log.w("AuraDetector", "Skipping unavailable camera frame", error)
                         } finally {
                             image.close()
@@ -350,6 +442,12 @@ private fun SubjectOverlay(
     frameState: VisionFrameState?,
     selectedSubjectId: Long?,
     liveReading: String?,
+    breatheAlpha: Float,
+    particleSystem: ParticleSystem,
+    particleTick: Int,
+    scanPulseProgress: Float,
+    scanPulseColor: Color,
+    scanningSubjectId: Long?,
     onSelectSubject: (Long?) -> Unit,
     onScanSubject: (Long) -> Unit
 ) {
@@ -360,11 +458,16 @@ private fun SubjectOverlay(
     val latestSelectionHandler = rememberUpdatedState(onSelectSubject)
     val latestScanHandler = rememberUpdatedState(onScanSubject)
     val latestSelectedSubjectId = rememberUpdatedState(selectedSubjectId)
-    if (projectedSubjects.isEmpty()) return
+    if (projectedSubjects.isEmpty() && particleSystem.particles.isEmpty()) return
 
     val labelPaint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        }
+    }
+    val backplatePaint = remember {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = DarkNavy.copy(alpha = 0.75f).toArgb()
         }
     }
 
@@ -392,7 +495,8 @@ private fun SubjectOverlay(
                 )
             }
     ) {
-        val strokeWidth = 3.dp.toPx()
+        val _tick = particleTick
+
         projectedSubjects.forEach { projected ->
             val subject = projected.subject
             val left = projected.box.left
@@ -400,65 +504,230 @@ private fun SubjectOverlay(
             val right = projected.box.right
             val bottom = projected.box.bottom
             val selected = subject.id == selectedSubjectId
-            val color = if (selected) NeonGreen else CyanAccent
+            val baseColor = paletteColor(subject.profile?.palette)
+            val color = if (selected) baseColor else baseColor.copy(alpha = 0.7f)
             val contour = projected.contour
 
+            val layers = listOf(
+                28f to 0.05f * breatheAlpha,
+                18f to 0.10f * breatheAlpha,
+                9f to 0.18f * breatheAlpha,
+                3f to 0.30f * breatheAlpha
+            )
+
+            val alphaMult = if (selected) 1.8f else 1.0f
+
             if (contour.size >= 3) {
-                val path = Path().apply {
+                val cx = contour.map { it.x }.average().toFloat()
+                val cy = contour.map { it.y }.average().toFloat()
+                
+                for ((expand, alpha) in layers) {
+                    val finalAlpha = (alpha * alphaMult).coerceAtMost(0.5f)
+                    val path = Path().apply {
+                        val first = contour.first()
+                        val dx = first.x - cx
+                        val dy = first.y - cy
+                        val dist = kotlin.math.hypot(dx, dy)
+                        val scale = if (dist > 0) (dist + expand) / dist else 1f
+                        moveTo(cx + dx * scale, cy + dy * scale)
+                        contour.drop(1).forEach { pt ->
+                            val pdx = pt.x - cx
+                            val pdy = pt.y - cy
+                            val pdist = kotlin.math.hypot(pdx, pdy)
+                            val pscale = if (pdist > 0) (pdist + expand) / pdist else 1f
+                            lineTo(cx + pdx * pscale, cy + pdy * pscale)
+                        }
+                        close()
+                    }
+                    drawPath(path, color.copy(alpha = finalAlpha), style = Fill)
+                }
+                
+                val crispPath = Path().apply {
                     moveTo(contour.first().x, contour.first().y)
                     contour.drop(1).forEach { lineTo(it.x, it.y) }
                     close()
                 }
-                drawPath(path, color.copy(alpha = 0.14f))
-                drawPath(path, color, style = Stroke(strokeWidth))
+                drawPath(crispPath, baseColor, style = Stroke(2.5.dp.toPx()))
+
             } else {
+                for ((expand, alpha) in layers) {
+                    val finalAlpha = (alpha * alphaMult).coerceAtMost(0.5f)
+                    drawRoundRect(
+                        color = color.copy(alpha = finalAlpha),
+                        topLeft = Offset(left - expand, top - expand),
+                        size = Size(right - left + expand * 2, bottom - top + expand * 2),
+                        cornerRadius = CornerRadius(20.dp.toPx()),
+                        style = Fill
+                    )
+                }
                 drawRoundRect(
-                    color = color.copy(alpha = 0.14f),
+                    color = baseColor,
                     topLeft = Offset(left, top),
                     size = Size(right - left, bottom - top),
-                    cornerRadius = CornerRadius(12.dp.toPx())
-                )
-                drawRoundRect(
-                    color = color,
-                    topLeft = Offset(left, top),
-                    size = Size(right - left, bottom - top),
-                    cornerRadius = CornerRadius(12.dp.toPx()),
-                    style = Stroke(strokeWidth)
+                    cornerRadius = CornerRadius(20.dp.toPx()),
+                    style = Stroke(2.5.dp.toPx())
                 )
             }
 
             if (selected) {
-                drawRoundRect(
-                    color = NeonGreen,
-                    topLeft = Offset(left, top),
-                    size = Size(right - left, bottom - top),
-                    cornerRadius = CornerRadius(16.dp.toPx()),
-                    style = Stroke(strokeWidth * 1.5f)
-                )
+                val boxWidth = right - left
+                val boxHeight = bottom - top
+                val bracketLen = (minOf(boxWidth, boxHeight) * 0.2f).coerceAtLeast(16f)
+                val strokeW = 2.5.dp.toPx()
+                val reticleColor = NeonGreen
+
+                drawLine(reticleColor, Offset(left, top), Offset(left + bracketLen, top), strokeWidth = strokeW)
+                drawLine(reticleColor, Offset(left, top), Offset(left, top + bracketLen), strokeWidth = strokeW)
+                drawLine(reticleColor, Offset(right, top), Offset(right - bracketLen, top), strokeWidth = strokeW)
+                drawLine(reticleColor, Offset(right, top), Offset(right, top + bracketLen), strokeWidth = strokeW)
+                drawLine(reticleColor, Offset(left, bottom), Offset(left + bracketLen, bottom), strokeWidth = strokeW)
+                drawLine(reticleColor, Offset(left, bottom), Offset(left, bottom - bracketLen), strokeWidth = strokeW)
+                drawLine(reticleColor, Offset(right, bottom), Offset(right - bracketLen, bottom), strokeWidth = strokeW)
+                drawLine(reticleColor, Offset(right, bottom), Offset(right, bottom - bracketLen), strokeWidth = strokeW)
+
+                val cx = left + boxWidth / 2f
+                val cy = top + boxHeight / 2f
+                val crossLenX = boxWidth * 0.3f
+                val crossLenY = boxHeight * 0.3f
+                drawLine(reticleColor.copy(alpha = 0.25f), Offset(cx - crossLenX / 2f, cy), Offset(cx + crossLenX / 2f, cy), strokeWidth = strokeW)
+                drawLine(reticleColor.copy(alpha = 0.25f), Offset(cx, cy - crossLenY / 2f), Offset(cx, cy + crossLenY / 2f), strokeWidth = strokeW)
             }
 
             drawIntoCanvas { canvas ->
-                labelPaint.color = color.toArgb()
+                labelPaint.color = baseColor.toArgb()
                 labelPaint.textSize = 14.dp.toPx()
-                val labelX = (left + strokeWidth).coerceIn(0f, (size.width - labelPaint.textSize).coerceAtLeast(0f))
-                val labelY = (top + labelPaint.textSize + strokeWidth)
+                val labelText = "SUBJECT #${subject.id}"
+                
+                val labelX = (left + 2.dp.toPx()).coerceIn(0f, (size.width - labelPaint.measureText(labelText)).coerceAtLeast(0f))
+                val labelY = (top + labelPaint.textSize + 2.dp.toPx())
                     .coerceIn(labelPaint.textSize, (size.height - labelPaint.textSize * 2f).coerceAtLeast(labelPaint.textSize))
-                canvas.nativeCanvas.drawText(
-                    "SUBJECT #${subject.id}",
-                    labelX,
-                    labelY,
-                    labelPaint
+
+                val textWidth = labelPaint.measureText(labelText)
+                canvas.nativeCanvas.drawRoundRect(
+                    labelX - 4.dp.toPx(), labelY - labelPaint.textSize - 2.dp.toPx(),
+                    labelX + textWidth + 4.dp.toPx(), labelY + 3.dp.toPx(),
+                    4.dp.toPx(), 4.dp.toPx(),
+                    backplatePaint
                 )
+                canvas.nativeCanvas.drawText(labelText, labelX, labelY, labelPaint)
+
                 if (selected && liveReading != null) {
+                    val readingWidth = labelPaint.measureText(liveReading)
+                    val readingY = (labelY + labelPaint.textSize + 4.dp.toPx())
+                        .coerceAtMost(size.height - 2.dp.toPx())
+                    
+                    canvas.nativeCanvas.drawRoundRect(
+                        labelX - 4.dp.toPx(), readingY - labelPaint.textSize - 2.dp.toPx(),
+                        labelX + readingWidth + 4.dp.toPx(), readingY + 3.dp.toPx(),
+                        4.dp.toPx(), 4.dp.toPx(),
+                        backplatePaint
+                    )
                     canvas.nativeCanvas.drawText(
                         liveReading,
                         labelX,
-                        (labelY + labelPaint.textSize + 4.dp.toPx())
-                            .coerceAtMost(size.height - 2.dp.toPx()),
+                        readingY,
                         labelPaint
                     )
                 }
             }
+
+            if (scanPulseProgress > 0f && scanningSubjectId == subject.id) {
+                val subjectCenter = projected.box.center
+                for (ring in 0..2) {
+                    val ringDelay = ring * 0.12f
+                    val ringProgress = ((scanPulseProgress - ringDelay) / (1f - ringDelay)).coerceIn(0f, 1f)
+                    if (ringProgress > 0f) {
+                        val maxRadius = maxOf(size.width, size.height) * 0.4f
+                        val radius = ringProgress * maxRadius
+                        val alpha = (1f - ringProgress) * 0.5f
+                        drawCircle(
+                            color = scanPulseColor.copy(alpha = alpha),
+                            radius = radius,
+                            center = subjectCenter,
+                            style = Stroke(2.5f.dp.toPx() * (1f - ringProgress * 0.5f))
+                        )
+                    }
+                }
+            }
+        }
+
+        particleSystem.spawnAmbient(projectedSubjects)
+        with(particleSystem) {
+            drawParticles()
+        }
+    }
+}
+
+private class Particle(
+    var x: Float, var y: Float,
+    var vx: Float, var vy: Float,
+    var life: Float, var maxLife: Float,
+    var size: Float, var color: Color
+)
+
+private class ParticleSystem {
+    val particles = mutableListOf<Particle>()
+    private val maxParticles = 150
+
+    fun update(dt: Float) {
+        val iter = particles.iterator()
+        while (iter.hasNext()) {
+            val p = iter.next()
+            p.x += p.vx * dt
+            p.y += p.vy * dt
+            p.vx *= 0.98f
+            p.vy *= 0.98f
+            p.life -= dt / p.maxLife
+            if (p.life <= 0f) iter.remove()
+        }
+    }
+
+    fun spawnAmbient(subjects: List<ProjectedSubject>) {
+        if (particles.size >= maxParticles) return
+        for (projected in subjects) {
+            if (particles.size >= maxParticles) break
+            val box = projected.box
+            val color = paletteColor(projected.subject.profile?.palette)
+            repeat(if (Random.nextFloat() < 0.3f) 1 else 0) {
+                particles.add(Particle(
+                    x = box.left + Random.nextFloat() * box.width,
+                    y = box.bottom - Random.nextFloat() * box.height * 0.3f,
+                    vx = Random.nextFloat() * 20f - 10f,
+                    vy = -(Random.nextFloat() * 40f + 15f),
+                    life = 1f,
+                    maxLife = Random.nextFloat() * 1.2f + 0.6f,
+                    size = Random.nextFloat() * 3.5f + 1.5f,
+                    color = color
+                ))
+            }
+        }
+    }
+
+    fun burst(centerX: Float, centerY: Float, count: Int, color: Color) {
+        repeat(count.coerceAtMost(maxParticles - particles.size)) {
+            val angle = Random.nextFloat() * 2f * kotlin.math.PI.toFloat()
+            val speed = Random.nextFloat() * 180f + 60f
+            particles.add(Particle(
+                x = centerX + Random.nextFloat() * 12f - 6f,
+                y = centerY + Random.nextFloat() * 12f - 6f,
+                vx = kotlin.math.cos(angle) * speed,
+                vy = kotlin.math.sin(angle) * speed,
+                life = 1f,
+                maxLife = Random.nextFloat() * 0.7f + 0.3f,
+                size = Random.nextFloat() * 5f + 2f,
+                color = color
+            ))
+        }
+    }
+
+    fun DrawScope.drawParticles() {
+        for (p in particles) {
+            val alpha = (p.life * 0.65f).coerceIn(0f, 1f)
+            drawCircle(
+                color = p.color.copy(alpha = alpha),
+                radius = p.size * p.life.coerceIn(0.3f, 1f),
+                center = Offset(p.x, p.y)
+            )
         }
     }
 }
@@ -529,10 +798,6 @@ private data class AuraScanResult(
     val classification: String
 )
 
-/**
- * Short, non-essential local feedback. The visible scan state always communicates progress and
- * completion, so sound and vibration can never be the only way to understand a result.
- */
 private class ScanFeedback(context: Context) {
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_MUSIC, 55)
     private val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -548,8 +813,13 @@ private class ScanFeedback(context: Context) {
     }
 
     fun scanCompleted(soundEnabled: Boolean) {
-        vibrate(longArrayOf(0, 34, 52, 82), -1)
-        if (soundEnabled) toneGenerator.startTone(ToneGenerator.TONE_PROP_ACK, 180)
+        vibrate(longArrayOf(0, 40, 60, 40, 60, 100), -1)
+        if (soundEnabled) toneGenerator.startTone(ToneGenerator.TONE_PROP_ACK, 250)
+    }
+
+    fun geigerTick(soundEnabled: Boolean) {
+        if (!soundEnabled) return
+        toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 18)
     }
 
     fun release() = toneGenerator.release()
@@ -635,6 +905,9 @@ private fun ScanOverlay(subjectId: Long?, progress: Float, result: AuraScanResul
     } else {
         1f
     }
+
+    val resColor = result?.classification?.let { resultColor(it) } ?: NeonGreen
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -646,8 +919,15 @@ private fun ScanOverlay(subjectId: Long?, progress: Float, result: AuraScanResul
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(24.dp)
+                .then(
+                    if (result != null) {
+                        Modifier
+                            .border(6.dp, resColor.copy(alpha = 0.15f))
+                            .border(4.dp, resColor.copy(alpha = 0.3f))
+                    } else Modifier
+                )
                 .background(DarkNavy.copy(alpha = if (result == null) 0.90f + scanPulse * 0.04f else 0.94f))
-                .border(2.dp, (if (result == null) OrangeWarning else NeonGreen).copy(alpha = scanPulse))
+                .border(2.dp, (if (result == null) OrangeWarning.copy(alpha = scanPulse) else resColor))
                 .padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -670,11 +950,11 @@ private fun ScanOverlay(subjectId: Long?, progress: Float, result: AuraScanResul
                 }
                 Text("NEGOTIATING WITH THE FIELD", color = CyanAccent)
             } else {
-                Text("AURA SCAN COMPLETE", color = NeonGreen)
+                Text("AURA SCAN COMPLETE", color = resColor)
                 Text("BASE: ${result.base}", color = CyanAccent)
                 Text(result.modifier, color = CyanAccent)
-                Text("FINAL: ${result.final}", color = NeonGreen)
-                Text(result.classification, color = OrangeWarning)
+                Text("FINAL: ${result.final}", color = resColor)
+                Text(result.classification, color = resColor)
             }
         }
     }
@@ -734,56 +1014,93 @@ private fun ScannerHud(
     liveReading: String?,
     scanStatus: String?,
     soundEnabled: Boolean,
+    subjectCount: Int,
+    subjectColor: Color,
     onToggleSound: () -> Unit,
     onExit: () -> Unit
 ) {
-    val color = when (status.state) {
+    val statusColor = when (status.state) {
         VisionLinkState.READY -> NeonGreen
         VisionLinkState.CONNECTING -> OrangeWarning
         VisionLinkState.DEGRADED -> OrangeWarning
         VisionLinkState.OFFLINE -> ErrorRed
-    }
-    val text = buildString {
-        append(status.detail)
-        status.lastFrameId?.let { append("  FRAME: $it") }
-        status.latencyMs?.let { append("  ${it}ms") }
-        selectedSubjectId?.let { append("  SELECTED: #$it") }
-        liveReading?.let { append("  $it") }
-        scanStatus?.let { append("  $it") }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(16.dp)
                 .fillMaxWidth()
-                .background(DarkNavy.copy(alpha = 0.86f))
-                .border(1.dp, color)
-                .padding(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+                .background(DarkNavy.copy(alpha = 0.9f))
+                .padding(12.dp)
         ) {
-            Text("AURA RADIATION MONITOR", color = CyanAccent)
-            Text(text, color = color)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("AURA RADIATION MONITOR", color = CyanAccent)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.size(8.dp).background(statusColor, CircleShape))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(status.detail, color = statusColor)
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            val metrics = buildString {
+                status.lastFrameId?.let { append("FRAME: $it  ") }
+                status.latencyMs?.let { append("${it}ms  ") }
+                append("SUBJECTS: $subjectCount")
+            }
+            Text(metrics, color = CyanAccent.copy(alpha = 0.7f))
         }
-        Button(
-            onClick = onToggleSound,
+
+        Box(
             modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 142.dp, end = 16.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = DarkNavy.copy(alpha = 0.90f))
-        ) {
-            Text(if (soundEnabled) "SOUND ON" else "SOUND OFF", color = CyanAccent)
+                .align(Alignment.TopCenter)
+                .padding(top = 62.dp)
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(statusColor)
+        )
+
+        if (selectedSubjectId != null) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(top = 74.dp, start = 16.dp)
+                    .background(DarkNavy.copy(alpha = 0.85f))
+                    .border(1.dp, subjectColor)
+                    .padding(8.dp)
+            ) {
+                Text("SUBJECT #$selectedSubjectId", color = subjectColor)
+                if (liveReading != null) {
+                    Text(liveReading, color = CyanAccent)
+                }
+            }
         }
-        Button(
-            onClick = onExit,
+
+        Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(24.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = DarkNavy)
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("DISCONNECT", color = CyanAccent)
+            Button(
+                onClick = onToggleSound,
+                colors = ButtonDefaults.buttonColors(containerColor = DarkNavy.copy(alpha = 0.90f)),
+                modifier = Modifier.border(1.dp, CyanAccent)
+            ) {
+                Text(if (soundEnabled) "SOUND ON" else "SOUND OFF", color = CyanAccent)
+            }
+            Button(
+                onClick = onExit,
+                colors = ButtonDefaults.buttonColors(containerColor = DarkNavy.copy(alpha = 0.90f)),
+                modifier = Modifier.border(1.dp, ErrorRed)
+            ) {
+                Text("DISCONNECT", color = ErrorRed)
+            }
         }
     }
 }
