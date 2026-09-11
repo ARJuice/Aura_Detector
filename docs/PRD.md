@@ -7,7 +7,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Defines what must be built and what must remain out of scope.  
-**Current stage:** Stage 6 — transport, server-side person segmentation, aligned Android overlays, and tap selection have implementation evidence; stable aura profiles and live readings remain to be built.
+**Current stage:** Stage 7 — transport, server-side person segmentation, aligned Android overlays, tap selection, and local aura-core logic have implementation evidence; physical live-value acceptance and scans remain.
 **Update this file when:** the user changes user-facing behavior, priorities, scope, success criteria, or a requirement's acceptance meaning. Do not update it merely because code structure changes.
 
 ## 1. Product Summary

@@ -29,6 +29,13 @@ data class TransportStatus(
 
 data class VisionPoint(val x: Float, val y: Float)
 
+data class VisionProfile(
+    val band: String,
+    val min: String,
+    val max: String,
+    val palette: String
+)
+
 data class VisionSubject(
     val id: Long,
     val confidence: Float,
@@ -36,7 +43,8 @@ data class VisionSubject(
     val y: Float,
     val width: Float,
     val height: Float,
-    val contour: List<VisionPoint>
+    val contour: List<VisionPoint>,
+    val profile: VisionProfile?
 )
 
 data class VisionFrameState(
@@ -227,7 +235,8 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
                         y = values[1],
                         width = values[2],
                         height = values[3],
-                        contour = contour
+                        contour = contour,
+                        profile = parseProfile(subject.optJSONObject("profile"))
                     )
                 )
             }
@@ -244,5 +253,14 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
                 add(VisionPoint(x, y))
             }
         }
+    }
+
+    private fun parseProfile(profile: JSONObject?): VisionProfile? {
+        if (profile == null) return null
+        val band = profile.optString("band").takeIf(String::isNotBlank) ?: return null
+        val minimum = profile.optString("min").takeIf(String::isNotBlank) ?: return null
+        val maximum = profile.optString("max").takeIf(String::isNotBlank) ?: return null
+        val palette = profile.optString("palette").takeIf(String::isNotBlank) ?: return null
+        return VisionProfile(band, minimum, maximum, palette)
     }
 }

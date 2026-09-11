@@ -70,6 +70,7 @@ import com.auradetector.transport.AuraWebSocket
 import com.auradetector.transport.TransportStatus
 import com.auradetector.transport.VisionFrameState
 import com.auradetector.transport.VisionPoint
+import com.auradetector.transport.VisionProfile
 import com.auradetector.transport.VisionLinkState
 import com.auradetector.ui.theme.CyanAccent
 import com.auradetector.ui.theme.DarkNavy
@@ -77,8 +78,16 @@ import com.auradetector.ui.theme.ErrorRed
 import com.auradetector.ui.theme.NeonGreen
 import com.auradetector.ui.theme.OrangeWarning
 import java.io.ByteArrayOutputStream
+import java.text.NumberFormat
+import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.cancellation.CancellationException
+import kotlin.math.exp
+import kotlin.math.ln
+import kotlin.random.Random
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 @Composable
 fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
@@ -105,9 +114,33 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
     val status by transport.status.collectAsState()
     val frameState by transport.frameState.collectAsState()
     var selectedSubjectId by remember { mutableStateOf<Long?>(null) }
+    var liveReading by remember { mutableStateOf<String?>(null) }
+    val latestFrameState = rememberUpdatedState(frameState)
+    val auraGenerators = remember { mutableMapOf<Long, AuraValueGenerator>() }
     LaunchedEffect(frameState) {
         if (selectedSubjectId != null && frameState?.subjects?.none { it.id == selectedSubjectId } != false) {
             selectedSubjectId = null
+        }
+    }
+    LaunchedEffect(selectedSubjectId) {
+        liveReading = null
+        val subjectId = selectedSubjectId ?: return@LaunchedEffect
+        val generator = auraGenerators.getOrPut(subjectId) { AuraValueGenerator(subjectId) }
+        try {
+            while (isActive) {
+                val subject = latestFrameState.value?.subjects?.firstOrNull { it.id == subjectId }
+                val profile = subject?.profile
+                if (profile == null) {
+                    liveReading = null
+                } else {
+                    liveReading = generator.next(profile)
+                }
+                delay(160)
+            }
+        } catch (_: CancellationException) {
+            // Selection changes cancel the old local reading loop.
+        } finally {
+            liveReading = null
         }
     }
     DisposableEffect(transport) {
@@ -120,9 +153,15 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
         SubjectOverlay(
             frameState = frameState,
             selectedSubjectId = selectedSubjectId,
+            liveReading = liveReading,
             onSelectSubject = { selectedSubjectId = it }
         )
-        ScannerHud(status = status, selectedSubjectId = selectedSubjectId, onExit = onExit)
+        ScannerHud(
+            status = status,
+            selectedSubjectId = selectedSubjectId,
+            liveReading = liveReading,
+            onExit = onExit
+        )
     }
     BackHandler(onBack = onExit)
 }
@@ -226,6 +265,7 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
 private fun SubjectOverlay(
     frameState: VisionFrameState?,
     selectedSubjectId: Long?,
+    liveReading: String?,
     onSelectSubject: (Long?) -> Unit
 ) {
     val projectedSubjects = remember(frameState) {
@@ -307,6 +347,14 @@ private fun SubjectOverlay(
                     (top - strokeWidth).coerceAtLeast(labelPaint.textSize),
                     labelPaint
                 )
+                if (selected && liveReading != null) {
+                    canvas.nativeCanvas.drawText(
+                        liveReading,
+                        left + strokeWidth,
+                        (top - strokeWidth).coerceAtLeast(labelPaint.textSize) + labelPaint.textSize + 4.dp.toPx(),
+                        labelPaint
+                    )
+                }
             }
         }
     }
@@ -368,6 +416,40 @@ private fun pointInPolygon(point: Offset, polygon: List<Offset>): Boolean {
     return inside
 }
 
+private class AuraValueGenerator(subjectId: Long) {
+    private val random = Random(subjectId.toInt() xor 0x5EEDBEEF)
+    private var profileKey: String? = null
+    private var value: Double? = null
+
+    fun next(profile: VisionProfile): String {
+        val key = "${profile.band}|${profile.min}|${profile.max}|${profile.palette}"
+        if (key != profileKey) {
+            profileKey = key
+            value = null
+        }
+
+        if (profile.max == "∞") return "∞ AUR/s"
+        val minimum = profile.min.toDoubleOrNull() ?: return "— AUR/s"
+        val maximum = profile.max.toDoubleOrNull() ?: return "— AUR/s"
+        if (maximum <= minimum) return format(minimum)
+
+        val positiveMinimum = maxOf(1.0, minimum)
+        val current = value ?: exp(
+            ln(positiveMinimum) + random.nextDouble() * (ln(maximum) - ln(positiveMinimum))
+        )
+        val next = if (maximum / positiveMinimum >= 100.0) {
+            current * exp(random.nextDouble(-0.08, 0.08))
+        } else {
+            current + (maximum - minimum) * random.nextDouble(-0.08, 0.08)
+        }
+        value = next.coerceIn(minimum, maximum)
+        return format(value ?: minimum)
+    }
+
+    private fun format(value: Double): String =
+        "${NumberFormat.getIntegerInstance(Locale.US).format(value)} AUR/s"
+}
+
 private fun ImageProxy.sourceToPreviewMatrix(
     previewOutput: OutputTransform?,
     imageTransformFactory: ImageProxyTransformFactory
@@ -382,7 +464,12 @@ private fun ImageProxy.sourceToPreviewMatrix(
 }
 
 @Composable
-private fun ScannerHud(status: TransportStatus, selectedSubjectId: Long?, onExit: () -> Unit) {
+private fun ScannerHud(
+    status: TransportStatus,
+    selectedSubjectId: Long?,
+    liveReading: String?,
+    onExit: () -> Unit
+) {
     val color = when (status.state) {
         VisionLinkState.READY -> NeonGreen
         VisionLinkState.CONNECTING -> OrangeWarning
@@ -394,6 +481,7 @@ private fun ScannerHud(status: TransportStatus, selectedSubjectId: Long?, onExit
         status.lastFrameId?.let { append("  FRAME: $it") }
         status.latencyMs?.let { append("  ${it}ms") }
         selectedSubjectId?.let { append("  SELECTED: #$it") }
+        liveReading?.let { append("  $it") }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {

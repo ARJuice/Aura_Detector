@@ -1,7 +1,7 @@
 # Aura Detector — Internal Build Guide
 
 **Audience:** AI agents and implementers.  
-**Current stage:** Step 6 — the Android subject-overlay baseline and tap selection are implemented and installed; stable aura profiles/live readings are next.
+**Current stage:** Step 7 — the Android subject-overlay baseline, tap selection, and local aura-core implementation are installed; physical live-value acceptance and scans are next.
 **Purpose:** Turns the product/technical documents into the safest next execution order.  
 **Update this file when:** a phase starts or finishes, an actual command/setup differs, a benchmark changes the recommended model/configuration, or a discovered constraint changes the build order. Do not claim a phase is complete without its stated definition-of-done evidence.
 
@@ -185,6 +185,12 @@ subject ID, band, minimum, maximum, palette, visual type, infinite flag
 Send a profile on its first appearance and send only normal tracking updates afterward. The phone uses a stateful, bounded random walk for the selected subject's live number, so values feel alive without network chatter.
 
 Use log-space movement for broad ranges and clamp every finite result to its band. Treat infinity as a named state, never a floating-point value used in ordinary arithmetic.
+
+### Current implementation evidence
+
+- `AuraWebSocket` parses the server's stable `band`, `min`, `max`, and `palette` profile fields without adding per-reading network traffic.
+- `ScannerScreen` owns one bounded `AuraValueGenerator` per selected track, updates the selected value locally every 160 ms, clamps finite bands, and treats `∞` as a named display state.
+- The APK compiles and installs; a physical person must still be selected to verify the live value on-device.
 
 ### Definition of done
 

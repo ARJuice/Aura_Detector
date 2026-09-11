@@ -3,7 +3,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Records decision rationale so later implementation does not reopen settled choices accidentally.  
-**Current stage:** Stage 6 — the PyTorch segmentation baseline, aligned Android overlay, and tap selection are implemented; aura and performance evidence are still pending.
+**Current stage:** Stage 7 — the PyTorch segmentation baseline, aligned Android overlay, tap selection, and local aura-core logic are implemented; scan and performance evidence are still pending.
 **Update this file when:** a meaningful decision is made, reversed, or validated/refuted by measurement. Never rewrite a historical decision; append a superseding ADR.
 
 ## ADR-001: One Local Inference PC
