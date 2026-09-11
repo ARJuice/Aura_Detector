@@ -3,7 +3,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Tells the AI the next permitted implementation step and the evidence that closes it.  
-**Current stage:** Build Guide Step 9 transport/payload/input safeguards are build- and test-verified. Physical scan, audio/haptic, landscape, and measured hosted-server acceptance remain.
+**Current stage:** Build Guide Step 8 feedback implementation is build- and install-verified. Physical scan, audio/haptic, landscape, and performance acceptance remain.
 **Update this file when:** starting a slice, completing its definition of done, splitting a proven-too-large slice, or adding a user-approved scope item. Preserve completed slices as history.
 
 Build each slice to its acceptance condition before starting the next one. This is an ordered backlog, not a promise of calendar dates.
@@ -18,7 +18,7 @@ Build each slice to its acceptance condition before starting the next one. This 
 | 5. Aura core | Stable profiles and live random walk. | FR-05, FR-07 | Implemented: Android parses the stable server profile and updates one selected track locally within its finite band (or displays named infinity). A live selected reading was observed on the authorized phone; range/infinity coverage remains. |
 | 6. Scan | Double-tap creates a safe result card. | FR-08, FR-09 | Implemented locally: selected-subject double-tap runs a 1-second state machine, then shows finite, milestone, or named infinity base/modifier/final/classification text. Physical acceptance remains pending. |
 | 7. Feedback | Readable effects, muteable sound, haptics. | FR-10, FR-13, NFR-07 | Implemented: the scan card pulses when system animations are enabled; scan start/completion request short system haptics and optional tone cues; a visible session mute toggle works. Verify sound/haptics and readability with a real scan and six subjects. |
-| 8. Performance | Bounded current-frame transport and measured hosted-server configuration. | NFR-01..05 | Implemented: one in-flight frame expires after 1.5 seconds, uploads are capped at 320 KB, contours at 48 points, and model input defaults to 512 px (bounded to 640 px). Measure the hosted phone/network p95 gate. |
+| 8. Performance | Measured target configuration and fallback. | NFR-01..05 | Target PC/phone network pass p95 release gate. |
 | 9. Post-MVP | Cooldown-safe interference. | FR-15 | Cannot retrigger continuously or disrupt core flow. |
 
 ## Definition of Ready

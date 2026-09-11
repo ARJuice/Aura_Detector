@@ -3,7 +3,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Records decision rationale so later implementation does not reopen settled choices accidentally.  
-**Current stage:** Stage 9 — the PyTorch segmentation baseline, aligned Android overlay, tap selection, local aura-core/scan logic, feedback, and transport/payload/input safeguards are implemented; physical scan/audio/haptic and hosted-server measurement evidence are still pending.
+**Current stage:** Stage 8 — the PyTorch segmentation baseline, aligned Android overlay, tap selection, local aura-core/scan logic, and local feedback are implemented; physical scan/audio/haptic and performance evidence are still pending.
 **Update this file when:** a meaningful decision is made, reversed, or validated/refuted by measurement. Never rewrite a historical decision; append a superseding ADR.
 
 ## ADR-001: One Local Inference PC
@@ -61,10 +61,3 @@
 **Decision:** Resolve `AURA_DEVICE=auto` to CUDA device 0 when PyTorch reports CUDA availability; otherwise run on CPU and keep the server usable.  
 **Why:** The same code path must be testable on development machines without a working CUDA build, while the RTX 4060 remains the target performance device.  
 **Consequence:** CPU timings are not release evidence; record the actual CUDA/PyTorch setup before the performance gate.
-
-## ADR-009: Host Hardware Is Outside the Mobile MVP Scope
-
-**Status:** Accepted; supersedes the hardware-specific parts of ADR-001, ADR-007, and ADR-008 for this build.
-**Decision:** Keep the single hosted inference-server architecture, but do not add GPU-specific or TensorRT work. Stage 9 is limited to stale-frame expiry, bounded JPEG/metadata payloads, and a 512-pixel default model input capped at 640 pixels.
-**Why:** These controls reduce end-to-end latency and memory pressure independently of a particular host accelerator.
-**Consequence:** Measure the deployed hosted server as configured; revisit host-specific acceleration only through an explicit new request.

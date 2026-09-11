@@ -1,9 +1,9 @@
 # Aura Detector Internal Documentation
 
 **Audience:** AI agents and project implementers. This folder is not public-facing project copy.  
-**Current project stage:** Build Guide Step 9 — the Android subject overlay, tap selection, local live reading/scan, feedback, current-frame expiry, bounded payloads, and 512-pixel default model input compile and test; physical scan/audio/haptic and hosted-server measurement remain.
-**What has been done:** planning documents, Android settings shell, server health/protocol scaffold, a latest-frame camera/WebSocket transport with stale-frame expiry, bounded JPEG/metadata payloads, a working camera preview, live YOLO person tracking, aligned subject overlays, phone-validated tap selection, a bounded local aura random walk, a local scan state machine, and local pulse/tone/haptic feedback now exist.
-**What happens next:** run the manual scan acceptance on the authorized phone—confirm the selected `AUR/s`, centered scan card, pulse, audio/haptics, and mute control—then measure the hosted-server configuration while keeping the private hotspot as the known-good network fallback.
+**Current project stage:** Build Guide Step 8 — the Android subject overlay, tap selection, local live reading/scan, and feedback implementation compile and install; physical scan/audio/haptic and performance acceptance are next.
+**What has been done:** planning documents, Android settings shell, server health/protocol scaffold, latest-frame camera/WebSocket transport, a working camera preview, live YOLO person tracking, aligned subject overlays, phone-validated tap selection, a bounded local aura random walk, a local scan state machine, and local pulse/tone/haptic feedback now exist.
+**What happens next:** run the manual scan acceptance on the authorized phone—confirm the selected `AUR/s`, centered scan card, pulse, audio/haptics, and mute control—then measure the final target configuration while keeping the private hotspot as the known-good network fallback.
 
 This folder is the source of truth before implementation begins. All documents describe the **MVP** unless a section explicitly says post-MVP.
 
@@ -36,7 +36,7 @@ Related project material:
 | Stage | Status | Evidence / documentation to update |
 |---|---|---|
 | 0. Planning | Complete | Product, architecture, protocol, UX, test, operations, backlog, and decisions are documented. |
-| 1. Environment / structure | Source exists; manual verification pending | Android settings shell and Python server scaffold exist. Record actual SDK, Python, device, host, and LAN setup in TRD and operations. |
+| 1. Environment / structure | Source exists; manual verification pending | Android settings shell and Python server scaffold exist. Record actual SDK, Python/CUDA, device, and LAN setup in TRD and operations. |
 | 2. Transport | Physically validated on private hotspot | Camera latest-frame JPEG sender, v1 hello/ack, token entry, frame ordering, status HUD, successful install, and camera preview are verified. |
 | 3. Vision and overlay | Live portrait tracking and overlay confirmed; landscape acceptance remains | `yolo26n-seg.pt` loads once, warms up, decodes JPEGs, filters COCO person, tracks with BoT-SORT, caps six subjects, and emits normalized boxes/contours. Android binds preview/analysis to one CameraX viewport, transmits the matching cropped and upright frame, then uses the exact rotated source-to-preview transform to render subjects. |
 | 4. Aura interaction | Selection, aura-core, and scan implementations built; physical acceptance pending | Tapping a projected subject selects only that track, updates the HUD, and clears selection when the track disappears. Server profiles drive a bounded local `AUR/s` random walk; double-tap on the selected track runs a local scan and shows base/modifier/final/classification. Verify on the phone, then add effects/audio/haptics. |

@@ -6,7 +6,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Defines the intended technical shape so implementation choices remain compatible end to end.  
-**Current stage:** Step 9 current-frame expiry, payload/metadata limits, and bounded model input are implemented in the build. The authorized phone held a live link through frame 130 after the CameraX transform guard; full scan, audio/haptic, landscape, and hosted-server performance acceptance remain. The PyTorch `yolo26n-seg.pt` baseline is selected.
+**Current stage:** Step 8 Android overlay, selection, local aura-core/scan logic, and feedback are implemented in the build. The authorized phone held a live link through frame 130 after the CameraX transform guard; full scan, audio/haptic, landscape, and performance acceptance remain. The PyTorch `yolo26n-seg.pt` baseline is selected; TensorRT remains deferred pending measurement.
 **Update this file when:** the actual architecture, owned state, dependencies, deployment shape, configuration, or failure behavior differs from this design. Record measured facts, not guesses.
 
 ## 1. Architecture
@@ -41,11 +41,11 @@ The phone always renders its local preview. The PC never returns processed video
 - **Client:** Kotlin, Jetpack Compose, CameraX, a custom Canvas/View layer, OkHttp WebSocket.
 - **Server:** Python 3.11+, FastAPI/Uvicorn, OpenCV, NumPy, Ultralytics.
 - **Inference:** `yolo26n-seg.pt` baseline; BoT-SORT with ReID disabled; COCO class `person` only.
-- **Runtime scope:** host-specific acceleration is not part of this build; the hosted server uses the bounded PyTorch baseline.
+- **Target acceleration:** fixed-shape 640×640 TensorRT FP16 engine on the demo RTX 4060, only after baseline correctness is measured.
 
 ### Step 4 model baseline
 
-Start with `yolo26n-seg.pt`: the nano instance-segmentation checkpoint is the fastest correctness baseline and supplies the person masks needed by the aura overlay. Configure `imgsz=512` by default, `classes=[0]`, and `tracker="botsort.yaml"`; `AURA_IMAGE_SIZE` can tune only within 320–640. Keep `yolo26s-seg.pt` as a future quality candidate only after the baseline is measured on the hosted server.
+Start with `yolo26n-seg.pt`: the nano instance-segmentation checkpoint is the fastest correctness baseline and supplies the person masks needed by the aura overlay. Configure `imgsz=640`, `classes=[0]`, `tracker="botsort.yaml"`, and `device=0` on the RTX 4060. Keep `yolo26s-seg.pt` as the quality candidate to benchmark only after the `n-seg` pipeline is correct. Final model selection remains measurement-driven and must meet NFR-01 and NFR-02.
 
 ## 4. Data and State
 
@@ -68,16 +68,16 @@ Start with `yolo26n-seg.pt`: the nano instance-segmentation checkpoint is the fa
 ### Frame policy
 
 - Client capture: CameraX `STRATEGY_KEEP_ONLY_LATEST`.
-- Network sender: one in-flight frame at most; it expires after 1.5 seconds and a late reply cannot release a newer frame.
-- Server: serial frame processing receives no unbounded client backlog because the client sends only after its gate is free.
+- Network sender: one in-flight frame and one replaceable pending frame at most.
+- Server: one replaceable newest decoded frame awaiting inference.
 - Client renderer: accept only a `frame_state` newer than its last accepted `frameId`.
 
 ### Current implementation evidence
 
-- Android source requests camera permission, configures CameraX `STRATEGY_KEEP_ONLY_LATEST`, downsamples YUV frames to a maximum 576-pixel long edge, recompresses them below 320 KB before Base64 encoding, caps sends at 15 FPS, and allows one outstanding frame.
+- Android source requests camera permission, configures CameraX `STRATEGY_KEEP_ONLY_LATEST`, downsamples YUV frames to a maximum 640-pixel long edge before JPEG encoding, caps sends at 15 FPS, and allows one outstanding frame.
 - Android source sends v1 `hello`/`frame` messages, stores the session token locally, and displays hello/frame-state link status and round-trip latency.
-- Python source accepts the v1 endpoint, validates hello/token/frame ordering, decodes each validated JPEG once, rejects frames above a 640-pixel edge or 320 KB, runs the loaded YOLO segmentation/tracking model, filters class `person`, caps six subjects, caps contours at 48 points, and returns normalized `frame_state` metadata.
-- The server loads `yolo26n-seg.pt` once at startup, warms it once, and defaults to a 512-pixel inference input; operator configuration is bounded to 320–640 pixels.
+- Python source accepts the v1 endpoint, validates hello/token/frame ordering, decodes JPEGs, runs the loaded YOLO segmentation/tracking model, filters class `person`, caps six subjects, simplifies contours, and returns normalized `frame_state` metadata.
+- The server loads `yolo26n-seg.pt` once at startup, warms it once, auto-selects CUDA device 0 when PyTorch CUDA is available, and falls back to CPU. The current development environment reported CPU-only PyTorch, so GPU performance is not yet measured.
 - `gradle :app:assembleDebug` has now passed on the development machine.
 - The debug APK has been installed and the camera preview works over a private Windows hotspot; the college captive-portal network is not a supported transport network.
 - The physical phone now receives `frame_state` acknowledgements from the YOLO server over the hotspot. The final shared-viewport/crop/rotation path reached `FRAME: 27` at 350 ms without a camera-process crash or CameraX viewport-mismatch warning; an earlier un-cropped path reached `FRAME: 17` at 315 ms. Both are smoke-test observations, not p50/p95 performance results.
@@ -100,14 +100,14 @@ Keep the first configuration surface small:
 
 | Key | Initial value |
 |---|---:|
-| Input JPEG size | Maximum 576-pixel long edge and 320 KB; aspect ratio preserved |
+| Input JPEG size | Maximum 640-pixel long edge; aspect ratio preserved |
 | JPEG quality | 70 |
 | Send cap | 12–15 FPS |
-| Inference size | 512×512 default; 320–640 allowed through `AURA_IMAGE_SIZE` |
+| Inference size | 640×640 |
 | Maximum subjects | 6 |
 | Confirmation frames | 3 |
 | Lost-track grace | 1 second |
-| Metadata target | <20 KB/frame; 48 contour points per subject maximum |
+| Metadata target | <20 KB/frame |
 
 Configuration is local development configuration, not a remote-admin feature.
 
@@ -123,5 +123,5 @@ Configuration is local development configuration, not a remote-admin feature.
 
 - Both devices must share a private local network that permits peer-to-peer traffic; captive-portal/public Wi-Fi is not supported.
 - The target Android device must support CameraX and the selected minimum SDK.
-- Hosted-server runtime details are deployment concerns and are not a mobile/client feature dependency.
+- NVIDIA/CUDA/TensorRT versions must be tested together on the actual demo PC.
 - Internet access is not needed during the demo after model artifacts are prepared.

@@ -1745,10 +1745,9 @@ private fun PermissionRequired(onRequestPermission: () -> Unit) {
     }
 }
 
-private const val MAX_UPLOAD_JPEG_BYTES = 320 * 1024
 private data class JpegFrame(val bytes: ByteArray, val width: Int, val height: Int)
 
-private fun ImageProxy.toJpeg(quality: Int = 70, maxLongEdge: Int = 576): JpegFrame {
+private fun ImageProxy.toJpeg(quality: Int = 70, maxLongEdge: Int = 640): JpegFrame {
     require(format == ImageFormat.YUV_420_888) { "Expected YUV_420_888 camera frame" }
     val sourceLeft = cropRect.left and 1.inv()
     val sourceTop = cropRect.top and 1.inv()
@@ -1837,46 +1836,21 @@ private fun copyChromaPlanes(
 
 private fun ByteArray.rotate(rotationDegrees: Int, width: Int, height: Int, quality: Int): JpegFrame {
     val rotation = ((rotationDegrees % 360) + 360) % 360
+    if (rotation == 0) return JpegFrame(this, width, height)
+
     val source = BitmapFactory.decodeByteArray(this, 0, size)
         ?: error("Camera JPEG could not be decoded for rotation")
-    val rotated = if (rotation == 0) source else Bitmap.createBitmap(
+    val rotated = Bitmap.createBitmap(
         source, 0, 0, source.width, source.height, Matrix().apply { postRotate(rotation.toFloat()) }, true
     )
     if (rotated !== source) source.recycle()
     return try {
-        rotated.compressForUpload(quality)
+        val bytes = ByteArrayOutputStream().use { stream ->
+            rotated.compress(Bitmap.CompressFormat.JPEG, quality, stream)
+            stream.toByteArray()
+        }
+        JpegFrame(bytes, rotated.width, rotated.height)
     } finally {
         rotated.recycle()
-    }
-}
-
-private fun Bitmap.compressForUpload(initialQuality: Int): JpegFrame {
-    var bitmap = this
-    var ownsBitmap = false
-    var quality = initialQuality
-    try {
-        while (true) {
-            val bytes = ByteArrayOutputStream().use { stream ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, quality, stream)
-                stream.toByteArray()
-            }
-            if (bytes.size <= MAX_UPLOAD_JPEG_BYTES) return JpegFrame(bytes, bitmap.width, bitmap.height)
-
-            if (quality > 45) {
-                quality -= 10
-                continue
-            }
-
-            val nextWidth = maxOf(2, (bitmap.width * 3 / 4) and 1.inv())
-            val nextHeight = maxOf(2, (bitmap.height * 3 / 4) and 1.inv())
-            if (nextWidth == bitmap.width || nextHeight == bitmap.height) return JpegFrame(bytes, bitmap.width, bitmap.height)
-            val scaled = Bitmap.createScaledBitmap(bitmap, nextWidth, nextHeight, true)
-            if (ownsBitmap) bitmap.recycle()
-            bitmap = scaled
-            ownsBitmap = true
-            quality = initialQuality
-        }
-    } finally {
-        if (ownsBitmap) bitmap.recycle()
     }
 }

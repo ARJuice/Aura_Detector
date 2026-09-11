@@ -22,8 +22,6 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MODEL_NAME = "yolo26n-seg.pt"
 PERSON_CLASS_ID = 0
-DEFAULT_IMAGE_SIZE = 512
-MAX_CONTOUR_POINTS = 48
 
 
 class ModelUnavailableError(RuntimeError):
@@ -42,7 +40,7 @@ class VisionPipeline:
         model_path: str | Path | None = None,
         device: str | int | None = None,
         confidence: float = 0.35,
-        image_size: int | None = None,
+        image_size: int = 640,
         tracker: str = "botsort.yaml",
         max_subjects: int = 6,
         model: Any | None = None,
@@ -51,13 +49,7 @@ class VisionPipeline:
         self.model_path = Path(configured_path).expanduser()
         self.device = device if device is not None else os.getenv("AURA_DEVICE", "auto")
         self.confidence = confidence
-        configured_image_size = image_size if image_size is not None else os.getenv("AURA_IMAGE_SIZE", DEFAULT_IMAGE_SIZE)
-        try:
-            requested_image_size = int(configured_image_size)
-        except (TypeError, ValueError):
-            logger.warning("Invalid AURA_IMAGE_SIZE=%r; using %d", configured_image_size, DEFAULT_IMAGE_SIZE)
-            requested_image_size = DEFAULT_IMAGE_SIZE
-        self.image_size = max(320, min(requested_image_size, 640))
+        self.image_size = image_size
         self.tracker = tracker
         self.max_subjects = max_subjects
         self.model = model
@@ -224,8 +216,8 @@ class VisionPipeline:
 
         if len(points) < 3:
             return None
-        if len(points) > MAX_CONTOUR_POINTS:
-            stride = int(np.ceil(len(points) / MAX_CONTOUR_POINTS))
+        if len(points) > 96:
+            stride = int(np.ceil(len(points) / 96))
             points = points[::stride]
         if len(points) < 3:
             return None

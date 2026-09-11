@@ -68,13 +68,6 @@ def test_process_frame_filters_people_normalises_and_ranks():
     assert kwargs["tracker"] == "botsort.yaml"
     assert kwargs["persist"] is True
     assert kwargs["device"] == "cpu"
-    assert kwargs["imgsz"] == 512
-
-
-def test_requested_model_input_is_clamped_to_transport_bounds():
-    pipeline = VisionPipeline(model=FakeModel(), device="cpu", image_size=4096)
-
-    assert pipeline.image_size == 640
 
 
 def test_process_frame_uses_fallback_id_when_tracker_does_not_return_one():
