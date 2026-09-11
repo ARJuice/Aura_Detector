@@ -71,4 +71,4 @@ Show a compact card with base, one modifier, final result, and classification. T
 
 ## 6. Coordinate and Gesture Rules
 
-The renderer and hit-test layer use the same source-to-preview transform. CameraX supplies the per-frame transform from the transmitted `ImageProxy` pixels to `PreviewView`, so preview crop, aspect ratio, rotation, and mirroring are applied exactly once. A box is an acceptable temporary hit region if no valid contour is available.
+The renderer and hit-test layer use the same source-to-preview transform. CameraX binds Preview and Analysis to a shared viewport; the client transmits that crop after rotation and uses the per-frame transform from those `ImageProxy` pixels to `PreviewView`. Preview crop, aspect ratio, rotation, and mirroring are therefore applied exactly once. A box is an acceptable temporary hit region if no valid contour is available.

@@ -2,6 +2,8 @@ package com.auradetector.ui.screens
 
 import android.Manifest
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Typeface
@@ -9,7 +11,6 @@ import android.content.pm.PackageManager
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
-import android.util.Size as AndroidSize
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -17,10 +18,12 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCaseGroup
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.camera.view.transform.CoordinateTransform
 import androidx.camera.view.transform.ImageProxyTransformFactory
+import androidx.camera.view.transform.OutputTransform
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -57,6 +60,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Observer
 import com.auradetector.data.ServerConfig
 import com.auradetector.transport.AuraWebSocket
 import com.auradetector.transport.TransportStatus
@@ -70,6 +74,7 @@ import com.auradetector.ui.theme.NeonGreen
 import com.auradetector.ui.theme.OrangeWarning
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicReference
 
 @Composable
 fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
@@ -114,35 +119,56 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val previewView = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER } }
     val analyzerExecutor = remember { Executors.newSingleThreadExecutor() }
+    val previewOutputTransform = remember { AtomicReference<OutputTransform?>(null) }
     val imageTransformFactory = remember {
         ImageProxyTransformFactory().apply {
-            setUsingCropRect(false)
+            setUsingCropRect(true)
             setUsingRotationDegrees(false)
         }
     }
 
     DisposableEffect(lifecycleOwner, transport) {
+        val updatePreviewTransform = {
+            previewOutputTransform.set(previewView.outputTransform)
+        }
+        val layoutListener = android.view.View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            updatePreviewTransform()
+        }
+        val streamObserver = Observer<PreviewView.StreamState> {
+            updatePreviewTransform()
+        }
+        previewView.addOnLayoutChangeListener(layoutListener)
+        previewView.previewStreamState.observe(lifecycleOwner, streamObserver)
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-        val bindCamera = Runnable {
+        var disposed = false
+        fun bindCamera() {
+            if (disposed) return
+            val viewPort = previewView.viewPort
+            if (viewPort == null) {
+                previewView.post(::bindCamera)
+                return
+            }
             val cameraProvider = cameraProviderFuture.get()
             val preview = Preview.Builder().build().also {
                 it.surfaceProvider = previewView.surfaceProvider
             }
             val analysis = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .setTargetResolution(AndroidSize(640, 360))
                 .build()
                 .also { imageAnalysis ->
                     imageAnalysis.setAnalyzer(analyzerExecutor) { image ->
                         try {
-                            image.sourceToPreviewMatrix(previewView, imageTransformFactory)?.let { transform ->
+                            image.sourceToPreviewMatrix(
+                                previewOutputTransform.get(),
+                                imageTransformFactory
+                            )?.let { transform ->
                                 val frame = image.toJpeg()
                                 transport.sendFrame(
                                     jpeg = frame.bytes,
                                     width = frame.width,
                                     height = frame.height,
-                                    sourceWidth = image.width,
-                                    sourceHeight = image.height,
+                                    sourceWidth = frame.width,
+                                    sourceHeight = frame.height,
                                     sourceToPreview = transform
                                 )
                             }
@@ -156,13 +182,22 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
             cameraProvider.bindToLifecycle(
                 lifecycleOwner,
                 CameraSelector.DEFAULT_BACK_CAMERA,
-                preview,
-                analysis
+                UseCaseGroup.Builder()
+                    .setViewPort(viewPort)
+                    .addUseCase(preview)
+                    .addUseCase(analysis)
+                    .build()
             )
         }
-        cameraProviderFuture.addListener(bindCamera, ContextCompat.getMainExecutor(context))
+        previewView.post {
+            cameraProviderFuture.addListener(::bindCamera, ContextCompat.getMainExecutor(context))
+        }
 
         onDispose {
+            disposed = true
+            previewView.removeOnLayoutChangeListener(layoutListener)
+            previewView.previewStreamState.removeObserver(streamObserver)
+            previewOutputTransform.set(null)
             if (cameraProviderFuture.isDone) cameraProviderFuture.get().unbindAll()
             analyzerExecutor.shutdown()
         }
@@ -248,10 +283,10 @@ private fun SubjectOverlay(frameState: VisionFrameState?) {
 }
 
 private fun ImageProxy.sourceToPreviewMatrix(
-    previewView: PreviewView,
+    previewOutput: OutputTransform?,
     imageTransformFactory: ImageProxyTransformFactory
 ): FloatArray? {
-    val previewOutput = previewView.outputTransform ?: return null
+    previewOutput ?: return null
     val sourceOutput = imageTransformFactory.getOutputTransform(this)
     return Matrix().apply {
         CoordinateTransform(sourceOutput, previewOutput).transform(this)
@@ -322,17 +357,26 @@ private data class JpegFrame(val bytes: ByteArray, val width: Int, val height: I
 
 private fun ImageProxy.toJpeg(quality: Int = 70, maxLongEdge: Int = 640): JpegFrame {
     require(format == ImageFormat.YUV_420_888) { "Expected YUV_420_888 camera frame" }
-    val sourceLongEdge = maxOf(width, height)
-    val targetWidth = if (sourceLongEdge <= maxLongEdge) width else {
-        maxOf(2, (width.toLong() * maxLongEdge / sourceLongEdge).toInt() and 1.inv())
+    val sourceLeft = cropRect.left and 1.inv()
+    val sourceTop = cropRect.top and 1.inv()
+    val sourceWidth = cropRect.width() and 1.inv()
+    val sourceHeight = cropRect.height() and 1.inv()
+    require(sourceWidth >= 2 && sourceHeight >= 2) { "Camera crop is too small" }
+
+    val sourceLongEdge = maxOf(sourceWidth, sourceHeight)
+    val targetWidth = if (sourceLongEdge <= maxLongEdge) sourceWidth else {
+        maxOf(2, (sourceWidth.toLong() * maxLongEdge / sourceLongEdge).toInt() and 1.inv())
     }
-    val targetHeight = if (sourceLongEdge <= maxLongEdge) height else {
-        maxOf(2, (height.toLong() * maxLongEdge / sourceLongEdge).toInt() and 1.inv())
+    val targetHeight = if (sourceLongEdge <= maxLongEdge) sourceHeight else {
+        maxOf(2, (sourceHeight.toLong() * maxLongEdge / sourceLongEdge).toInt() and 1.inv())
     }
     val nv21 = ByteArray(targetWidth * targetHeight * ImageFormat.getBitsPerPixel(ImageFormat.NV21) / 8)
-    copyPlane(planes[0], width, height, targetWidth, targetHeight, nv21, 0)
+    copyPlane(
+        planes[0], sourceLeft, sourceTop, sourceWidth, sourceHeight, targetWidth, targetHeight, nv21, 0
+    )
     copyChromaPlanes(
-        planes[1], planes[2], width, height, targetWidth, targetHeight, nv21, targetWidth * targetHeight
+        planes[1], planes[2], sourceLeft, sourceTop, sourceWidth, sourceHeight,
+        targetWidth, targetHeight, nv21, targetWidth * targetHeight
     )
 
     val jpeg = ByteArrayOutputStream().use { stream ->
@@ -340,11 +384,13 @@ private fun ImageProxy.toJpeg(quality: Int = 70, maxLongEdge: Int = 640): JpegFr
             .compressToJpeg(Rect(0, 0, targetWidth, targetHeight), quality, stream)
         stream.toByteArray()
     }
-    return JpegFrame(jpeg, targetWidth, targetHeight)
+    return jpeg.rotate(imageInfo.rotationDegrees, targetWidth, targetHeight, quality)
 }
 
 private fun copyPlane(
     plane: ImageProxy.PlaneProxy,
+    sourceLeft: Int,
+    sourceTop: Int,
     sourceWidth: Int,
     sourceHeight: Int,
     targetWidth: Int,
@@ -355,10 +401,10 @@ private fun copyPlane(
     val buffer = plane.buffer
     val start = buffer.position()
     for (targetRow in 0 until targetHeight) {
-        val sourceRow = targetRow * sourceHeight / targetHeight
+        val sourceRow = sourceTop + targetRow * sourceHeight / targetHeight
         val rowStart = start + sourceRow * plane.rowStride
         for (targetColumn in 0 until targetWidth) {
-            val sourceColumn = targetColumn * sourceWidth / targetWidth
+            val sourceColumn = sourceLeft + targetColumn * sourceWidth / targetWidth
             output[outputOffset + targetRow * targetWidth + targetColumn] =
                 buffer.get(rowStart + sourceColumn * plane.pixelStride)
         }
@@ -368,6 +414,8 @@ private fun copyPlane(
 private fun copyChromaPlanes(
     uPlane: ImageProxy.PlaneProxy,
     vPlane: ImageProxy.PlaneProxy,
+    sourceLeft: Int,
+    sourceTop: Int,
     sourceWidth: Int,
     sourceHeight: Int,
     targetWidth: Int,
@@ -381,9 +429,9 @@ private fun copyChromaPlanes(
     val vStart = vBuffer.position()
     var outputIndex = outputOffset
     for (targetRow in 0 until targetHeight / 2) {
-        val sourceRow = targetRow * sourceHeight / targetHeight
+        val sourceRow = sourceTop / 2 + targetRow * sourceHeight / targetHeight
         for (targetColumn in 0 until targetWidth / 2) {
-            val sourceColumn = targetColumn * sourceWidth / targetWidth
+            val sourceColumn = sourceLeft / 2 + targetColumn * sourceWidth / targetWidth
             output[outputIndex++] = vBuffer.get(
                 vStart + sourceRow * vPlane.rowStride + sourceColumn * vPlane.pixelStride
             )
@@ -391,5 +439,26 @@ private fun copyChromaPlanes(
                 uStart + sourceRow * uPlane.rowStride + sourceColumn * uPlane.pixelStride
             )
         }
+    }
+}
+
+private fun ByteArray.rotate(rotationDegrees: Int, width: Int, height: Int, quality: Int): JpegFrame {
+    val rotation = ((rotationDegrees % 360) + 360) % 360
+    if (rotation == 0) return JpegFrame(this, width, height)
+
+    val source = BitmapFactory.decodeByteArray(this, 0, size)
+        ?: error("Camera JPEG could not be decoded for rotation")
+    val rotated = Bitmap.createBitmap(
+        source, 0, 0, source.width, source.height, Matrix().apply { postRotate(rotation.toFloat()) }, true
+    )
+    if (rotated !== source) source.recycle()
+    return try {
+        val bytes = ByteArrayOutputStream().use { stream ->
+            rotated.compress(Bitmap.CompressFormat.JPEG, quality, stream)
+            stream.toByteArray()
+        }
+        JpegFrame(bytes, rotated.width, rotated.height)
+    } finally {
+        rotated.recycle()
     }
 }

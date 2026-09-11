@@ -129,7 +129,7 @@ Return normalized coordinates so each phone layout can scale them correctly:
 - `ScannerScreen.kt` downscales every camera payload to a maximum 640-pixel long edge before JPEG encoding; a high-resolution camera frame therefore cannot violate the protocol's 1920×1080 input limit.
 - `server/tests/test_pipeline.py` verifies person filtering, confidence ranking, subject cap, normalized coordinates, contour bounds, fallback IDs, and malformed JPEG handling.
 - Device selection is automatic: CUDA device 0 when available, otherwise CPU. The development environment currently reports CPU-only PyTorch, so the RTX 4060 performance gate is still open.
-- The private-hotspot smoke test has received a live `frame_state` (`FRAME: 17`, 315 ms); this is not yet a person-track or p95 performance acceptance result.
+- The private-hotspot smoke test has received live `frame_state` acknowledgements before and after the shared-viewport/crop/rotation fix (`FRAME: 17`, 315 ms; final check: `FRAME: 27`, 350 ms). These are smoke-test observations, not person-track or p95 performance acceptance results.
 
 ### Definition of done still pending
 
@@ -153,8 +153,8 @@ Use one custom Canvas layer for all per-frame drawing. Keep Compose out of the h
 
 ### Current implementation evidence
 
-- `AuraWebSocket` parses up to six current `frame_state.subjects` with normalized boxes and optional simplified contours, retaining each acknowledged frame's source size and its CameraX source-to-preview transform.
-- `ScannerScreen` projects those coordinates through CameraX's exact per-frame `ImageProxy`-to-`PreviewView` transform, then draws a Canvas outline/contour and `SUBJECT #id` label over the local preview.
+- `AuraWebSocket` parses up to six current `frame_state.subjects` with normalized boxes and optional simplified contours, retaining each acknowledged frame's cropped, upright source size and CameraX source-to-preview transform.
+- `ScannerScreen` binds preview and analysis in one CameraX `UseCaseGroup` using `PreviewView.viewPort`, transmits that same crop after rotation, then projects its coordinates through the exact per-frame `ImageProxy`-to-`PreviewView` transform before drawing the Canvas outline/contour and `SUBJECT #id` label.
 - The debug APK compiles and is installed. A physical walking-person alignment check is still required before selection is added.
 
 Implement coordinate mapping once. The server frame and PreviewView may have different aspect ratios or rotation; map normalized source coordinates through the exact preview crop/rotation transform before drawing or hit-testing. Test portrait and landscape before spending time on effects.
