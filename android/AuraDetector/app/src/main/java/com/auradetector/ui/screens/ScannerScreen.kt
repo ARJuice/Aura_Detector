@@ -44,7 +44,10 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.graphics.lerp
 import kotlin.math.sin
 import kotlin.math.cos
@@ -156,7 +159,7 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
         return
     }
 
-    val transport = remember(config) { AuraWebSocket(config) }
+    val transport = remember { AuraWebSocket(config) }
     val status by transport.status.collectAsState()
     val frameState by transport.frameState.collectAsState()
     var selectedSubjectId by remember { mutableStateOf<Long?>(null) }
@@ -169,8 +172,6 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
     val scanGenerators = remember { mutableMapOf<Long, AuraScanGenerator>() }
     var soundEnabled by remember { mutableStateOf(true) }
     val latestSoundEnabled = rememberUpdatedState(soundEnabled)
-    var bonusAuraEnabled by remember { mutableStateOf(true) }
-    val latestBonusAuraEnabled = rememberUpdatedState(bonusAuraEnabled)
     val feedback = remember(context) { ScanFeedback(context) }
 
     val particleSystem = remember { ParticleSystem() }
@@ -209,30 +210,42 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
         }
     }
 
-    LaunchedEffect(selectedSubjectId, soundEnabled) {
-        if (selectedSubjectId == null || !soundEnabled) return@LaunchedEffect
+    LaunchedEffect(frameState, soundEnabled) {
+        if (!soundEnabled) return@LaunchedEffect
         while (isActive) {
-            val currentReading = liveReading
-            if (currentReading != null) {
-                val aurStr = currentReading.replace(",", "").replace(" AUR/s", "").trim()
-                val aurVal = aurStr.toLongOrNull() ?: 0L
-                val delayMs = when {
-                    aurVal == 0L -> -1L
-                    aurVal <= 100 -> 700L
-                    aurVal <= 500 -> 400L
-                    aurVal <= 5000 -> 200L
-                    aurVal <= 50000 -> 100L
-                    else -> 50L
-                }
-                if (delayMs > 0) {
-                    feedback.geigerTick(soundEnabled)
-                    delay(delayMs)
-                } else {
-                    delay(100)
-                }
-            } else {
-                delay(100)
+            val subjects = frameState?.subjects.orEmpty()
+            if (subjects.isEmpty()) {
+                delay(350)
+                continue
             }
+
+            var totalIntensity = 0L
+            var maxProximityArea = 0.05f
+
+            for (subj in subjects) {
+                val area = subj.width * subj.height
+                if (area > maxProximityArea) maxProximityArea = area
+                val profile = subj.profile ?: continue
+                val generator = auraGenerators.getOrPut(subj.id) { AuraValueGenerator(subj.id) }
+                val reading = generator.next(profile)
+                val rawStr = reading.replace(" AUR/s", "").replace("+", "").replace("−", "").trim()
+                val valNum = if (rawStr.contains("∞")) 100_000L else rawStr.toLongOrNull() ?: 500L
+                totalIntensity += valNum
+            }
+
+            val proximityMultiplier = (maxProximityArea * 2.2f).coerceIn(0.05f, 1.5f)
+            val effectiveField = (totalIntensity * 0.15f * proximityMultiplier).toLong()
+
+            val delayMs = when {
+                effectiveField <= 300L -> 850L
+                effectiveField <= 3000L -> 450L
+                effectiveField <= 15000L -> 220L
+                effectiveField <= 35000L -> 100L
+                else -> 40L
+            }
+
+            feedback.geigerTick(soundEnabled)
+            delay(delayMs)
         }
     }
 
@@ -305,7 +318,7 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
             scanPulseProgress.snapTo(0f)
         }
     }
-    DisposableEffect(transport) {
+    DisposableEffect(Unit) {
         transport.connect()
         onDispose { transport.close() }
     }
@@ -372,12 +385,10 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
                 else -> null
             },
             soundEnabled = soundEnabled,
-            bonusAuraEnabled = bonusAuraEnabled,
+            frameState = frameState,
             subjectCount = subjectCount,
             subjectColor = hudSubjectColor,
-            onToggleSound = { soundEnabled = !soundEnabled },
-            onToggleBonusAura = { bonusAuraEnabled = !bonusAuraEnabled },
-            onExit = onExit
+            onToggleSound = { soundEnabled = !soundEnabled }
         )
     }
     BackHandler(onBack = onExit)
@@ -1351,12 +1362,10 @@ private fun ScannerHud(
     liveReading: String?,
     scanStatus: String?,
     soundEnabled: Boolean,
-    bonusAuraEnabled: Boolean,
+    frameState: VisionFrameState?,
     subjectCount: Int,
     subjectColor: Color,
-    onToggleSound: () -> Unit,
-    onToggleBonusAura: () -> Unit,
-    onExit: () -> Unit
+    onToggleSound: () -> Unit
 ) {
     val statusColor = when (status.state) {
         VisionLinkState.READY -> NeonGreen
@@ -1471,48 +1480,249 @@ private fun ScannerHud(
             )
         }
 
-        // BOTTOM CONTROLS BAR - Safe Navigation Bar Padded
-        Row(
+        // BOTTOM-LEFT GEIGER FLUX COUNTER & SPECTRAL GRAPH WIDGET
+        GeigerFluxMeter(
+            frameState = frameState,
+            selectedSubjectId = selectedSubjectId,
+            liveReading = liveReading,
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
+                .align(Alignment.BottomStart)
                 .navigationBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .padding(start = 12.dp, bottom = 14.dp)
+        )
+
+        // BOTTOM-RIGHT SOUND TOGGLE BUTTON - Safe Navigation Bar Padded
+        Button(
+            onClick = onToggleSound,
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = DarkNavy.copy(alpha = 0.90f)),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(end = 12.dp, bottom = 14.dp)
+                .border(1.dp, CyanAccent, RoundedCornerShape(12.dp))
         ) {
-            Button(
-                onClick = onToggleSound,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = DarkNavy.copy(alpha = 0.90f)),
-                modifier = Modifier.border(1.dp, CyanAccent, RoundedCornerShape(12.dp))
-            ) {
-                Text(if (soundEnabled) "SOUND ON" else "SOUND OFF", color = CyanAccent)
+            Text(if (soundEnabled) "SOUND ON" else "SOUND OFF", color = CyanAccent)
+        }
+    }
+}
+
+@Composable
+private fun GeigerFluxMeter(
+    frameState: VisionFrameState?,
+    selectedSubjectId: Long?,
+    liveReading: String?,
+    modifier: Modifier = Modifier
+) {
+    val targetCpm = remember(frameState, selectedSubjectId, liveReading) {
+        var base = Random.nextInt(18, 36)
+        val subjects = frameState?.subjects.orEmpty()
+        if (subjects.isNotEmpty()) {
+            var totalAuraSum = 0L
+            var maxProximityArea = 0.05f
+
+            for (subj in subjects) {
+                val area = subj.width * subj.height
+                if (area > maxProximityArea) maxProximityArea = area
+
+                val profile = subj.profile ?: continue
+                val minVal = profile.min.toDoubleOrNull() ?: 100.0
+                val maxVal = if (profile.max == "∞") 100_000.0 else profile.max.toDoubleOrNull() ?: 5000.0
+                val avgVal = (minVal + maxVal) / 2.0
+                totalAuraSum += avgVal.toLong()
             }
 
-            Button(
-                onClick = onToggleBonusAura,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = DarkNavy.copy(alpha = 0.90f)),
-                modifier = Modifier.border(
-                    1.dp,
-                    if (bonusAuraEnabled) NeonGreen else CyanAccent.copy(alpha = 0.5f),
-                    RoundedCornerShape(12.dp)
-                )
+            if (selectedSubjectId != null && liveReading != null) {
+                if (liveReading.contains("∞")) {
+                    totalAuraSum += 50_000L
+                } else {
+                    val rawVal = liveReading.replace(",", "").replace(" AUR/s", "")
+                        .replace("+", "").replace("−", "").replace(" AURA", "").trim().toLongOrNull() ?: 0L
+                    totalAuraSum += rawVal
+                }
+            }
+
+            val proximityMultiplier = (maxProximityArea * 2.2f).coerceIn(0.05f, 1.5f)
+            val scaledAuraField = (totalAuraSum * 0.15f * proximityMultiplier).toInt()
+
+            base += scaledAuraField.coerceAtMost(99999)
+        }
+        base
+    }
+
+    val animatedCpm = remember { Animatable(24f) }
+    LaunchedEffect(targetCpm) {
+        animatedCpm.animateTo(
+            targetValue = targetCpm.toFloat(),
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioLowBouncy,
+                stiffness = Spring.StiffnessLow
+            )
+        )
+    }
+
+    val transition = rememberInfiniteTransition(label = "geigerBars")
+    val barPhase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 2f * PI.toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "barPhase"
+    )
+
+    val currentCpmInt = animatedCpm.value.toInt()
+    val uSvRate = (currentCpmInt / 120.0)
+
+    val (statusText, statusColor) = when {
+        currentCpmInt > 40000 -> "☢ CRITICAL OVERFLOW" to ErrorRed
+        currentCpmInt > 12000 -> "⚡ FLUX SPIKE" to OrangeWarning
+        currentCpmInt > 1200 -> "▲ ELEVATED FIELD" to NeonGreen
+        else -> "● NOMINAL FLUX" to CyanAccent
+    }
+
+    Box(
+        modifier = modifier
+            .width(210.dp)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        DarkNavy.copy(alpha = 0.92f),
+                        Color(0xFF0B1021).copy(alpha = 0.95f)
+                    )
+                ),
+                shape = CutCornerShape(topEnd = 12.dp, bottomStart = 8.dp)
+            )
+            .border(
+                1.dp,
+                Brush.horizontalGradient(
+                    listOf(statusColor.copy(alpha = 0.8f), CyanAccent.copy(alpha = 0.4f))
+                ),
+                shape = CutCornerShape(topEnd = 12.dp, bottomStart = 8.dp)
+            )
+            .padding(10.dp)
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("☢", color = statusColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        "GEIGER FLUX MONITOR",
+                        color = CyanAccent,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .background(statusColor, CircleShape)
+                        .border(1.dp, AuraWhiteHot.copy(alpha = 0.6f), CircleShape)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column {
+                    Text(
+                        text = if (currentCpmInt > 99999) "99999+ CPM" else "$currentCpmInt CPM",
+                        color = statusColor,
+                        fontSize = 17.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black
+                    )
+                    Text(
+                        text = String.format(Locale.US, "%.2f μSv/h", uSvRate),
+                        color = CyanAccent.copy(alpha = 0.75f),
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
                 Text(
-                    if (bonusAuraEnabled) "BONUS: ON" else "BONUS: OFF",
-                    color = if (bonusAuraEnabled) NeonGreen else CyanAccent.copy(alpha = 0.7f)
+                    text = statusText,
+                    color = statusColor.copy(alpha = 0.9f),
+                    fontSize = 8.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
                 )
             }
 
-            Button(
-                onClick = onExit,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = DarkNavy.copy(alpha = 0.90f)),
-                modifier = Modifier.border(1.dp, ErrorRed, RoundedCornerShape(12.dp))
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(38.dp)
+                    .background(Color(0xFF060913), shape = RoundedCornerShape(6.dp))
+                    .border(0.5.dp, statusColor.copy(alpha = 0.4f), shape = RoundedCornerShape(6.dp))
             ) {
-                Text("DISCONNECT", color = ErrorRed)
+                val numBars = 11
+                val centerIndex = 5
+                val sigma = 2.2f
+                val barGap = 2.dp.toPx()
+                val totalGap = barGap * (numBars - 1)
+                val barWidth = (size.width - totalGap) / numBars
+                val normalizedFlux = (currentCpmInt / 25000f).coerceIn(0.12f, 1.0f)
+
+                val gridY = size.height * 0.5f
+                drawLine(
+                    color = Color.White.copy(alpha = 0.08f),
+                    start = Offset(0f, gridY),
+                    end = Offset(size.width, gridY),
+                    strokeWidth = 1f
+                )
+
+                for (i in 0 until numBars) {
+                    val x = i * (barWidth + barGap)
+                    val distFromCenter = kotlin.math.abs(i - centerIndex).toFloat()
+                    val gaussianFactor = kotlin.math.exp(-(distFromCenter * distFromCenter) / (2.0f * sigma * sigma))
+
+                    val breathJitter = 1.0f + kotlin.math.sin(barPhase + i * 0.25f) * 0.04f
+                    val peakBarHeight = size.height * normalizedFlux * breathJitter
+                    val barHeight = (peakBarHeight * gaussianFactor).coerceIn(4f, size.height)
+
+                    val topY = size.height - barHeight
+
+                    val barColor = when {
+                        normalizedFlux > 0.75f -> ErrorRed
+                        normalizedFlux > 0.45f -> OrangeWarning
+                        normalizedFlux > 0.25f -> NeonGreen
+                        else -> CyanAccent
+                    }
+
+                    drawRoundRect(
+                        color = barColor,
+                        topLeft = Offset(x, topY),
+                        size = Size(barWidth, barHeight),
+                        cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx())
+                    )
+
+                    drawRect(
+                        color = AuraWhiteHot.copy(alpha = 0.9f),
+                        topLeft = Offset(x, topY),
+                        size = Size(barWidth, 2f)
+                    )
+
+                    drawRoundRect(
+                        color = Color.Black.copy(alpha = 0.4f),
+                        topLeft = Offset(x, topY),
+                        size = Size(barWidth, barHeight),
+                        cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx()),
+                        style = Stroke(width = 1f)
+                    )
+                }
             }
         }
     }

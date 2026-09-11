@@ -210,10 +210,15 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
     }
 
     override fun close() {
+        helloAcknowledged.set(false)
+        awaitingFrameState.set(false)
+        inFlightFrame.set(null)
         _frameState.value = null
-        webSocket?.close(1000, "Scanner closed")
-        client.dispatcher.executorService.shutdown()
-        client.connectionPool.evictAll()
+        _status.value = TransportStatus(VisionLinkState.OFFLINE, "Closed")
+        try { webSocket?.close(1000, "Scanner closed") } catch (_: Exception) {}
+        webSocket = null
+        try { client.dispatcher.executorService.shutdown() } catch (_: Exception) {}
+        try { client.connectionPool.evictAll() } catch (_: Exception) {}
     }
 
     private fun parseSubjects(subjects: org.json.JSONArray?): List<VisionSubject> {
