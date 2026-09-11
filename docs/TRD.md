@@ -82,7 +82,6 @@ Start with `yolo26n-seg.pt`: the nano instance-segmentation checkpoint is the fa
 - The debug APK has been installed and the camera preview works over a private Windows hotspot; the college captive-portal network is not a supported transport network.
 - The physical phone now receives `frame_state` acknowledgements from the YOLO server over the hotspot. The final shared-viewport/crop/rotation path reached `FRAME: 27` at 350 ms without a camera-process crash or CameraX viewport-mismatch warning; an earlier un-cropped path reached `FRAME: 17` at 315 ms. Both are smoke-test observations, not p50/p95 performance results.
 - Android binds preview and analysis through one CameraX `UseCaseGroup`/`PreviewView` viewport, encodes the analysis crop after applying its rotation, then projects normalized boxes/contours with CameraX's per-frame source-to-`PreviewView` transform into a Canvas overlay. It renders a temporary `SUBJECT #id` label; physical alignment is still unmeasured.
-- The current phone calibration leaves the verified person-box transform intact and rotates only the rendered segmentation contour 90 degrees clockwise around its projected box centre, correcting the observed left-tilted silhouette without moving the detected subject.
 
 ## 5. Data Boundaries
 
