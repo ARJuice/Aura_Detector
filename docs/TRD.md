@@ -80,8 +80,8 @@ Start with `yolo26n-seg.pt`: the nano instance-segmentation checkpoint is the fa
 - The server loads `yolo26n-seg.pt` once at startup, warms it once, auto-selects CUDA device 0 when PyTorch CUDA is available, and falls back to CPU. The current development environment reported CPU-only PyTorch, so GPU performance is not yet measured.
 - `gradle :app:assembleDebug` has now passed on the development machine.
 - The debug APK has been installed and the camera preview works over a private Windows hotspot; the college captive-portal network is not a supported transport network.
-- The physical phone now receives `frame_state` acknowledgements from the YOLO server over the hotspot. The final shared-viewport/crop/rotation path reached `FRAME: 27` at 350 ms without a camera-process crash or CameraX viewport-mismatch warning; an earlier un-cropped path reached `FRAME: 17` at 315 ms. Both are smoke-test observations, not p50/p95 performance results.
-- Android binds preview and analysis through one CameraX `UseCaseGroup`/`PreviewView` viewport, encodes the analysis crop after applying its rotation, then projects normalized boxes/contours with CameraX's per-frame source-to-`PreviewView` transform into a Canvas overlay. It renders a temporary `SUBJECT #id` label; physical alignment is still unmeasured.
+- The physical phone now receives `frame_state` acknowledgements from the YOLO server over the hotspot. The current full-frame baseline reached `FRAME: 17` at 271 ms without a camera-process crash. This is a smoke-test observation, not a p50/p95 performance result.
+- Android preserves the original analysis-pixel format for the server and caches `PreviewView` output transforms on the main thread before projecting normalized boxes/contours into a Canvas overlay. A shared-viewport/crop/rotation experiment regressed detector behavior and was reverted; it renders a temporary `SUBJECT #id` label, while physical alignment remains unmeasured.
 
 ## 5. Data Boundaries
 

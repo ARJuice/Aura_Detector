@@ -129,7 +129,7 @@ Return normalized coordinates so each phone layout can scale them correctly:
 - `ScannerScreen.kt` downscales every camera payload to a maximum 640-pixel long edge before JPEG encoding; a high-resolution camera frame therefore cannot violate the protocol's 1920×1080 input limit.
 - `server/tests/test_pipeline.py` verifies person filtering, confidence ranking, subject cap, normalized coordinates, contour bounds, fallback IDs, and malformed JPEG handling.
 - Device selection is automatic: CUDA device 0 when available, otherwise CPU. The development environment currently reports CPU-only PyTorch, so the RTX 4060 performance gate is still open.
-- The private-hotspot smoke test has received live `frame_state` acknowledgements before and after the shared-viewport/crop/rotation fix (`FRAME: 17`, 315 ms; final check: `FRAME: 27`, 350 ms). These are smoke-test observations, not person-track or p95 performance acceptance results.
+- The private-hotspot smoke test has received live `frame_state` acknowledgements before and after the reverted shared-viewport/crop/rotation experiment. The current full-frame baseline reached `FRAME: 17` at 271 ms. This is a smoke-test observation, not person-track or p95 performance acceptance result.
 
 ### Definition of done still pending
 
@@ -153,8 +153,8 @@ Use one custom Canvas layer for all per-frame drawing. Keep Compose out of the h
 
 ### Current implementation evidence
 
-- `AuraWebSocket` parses up to six current `frame_state.subjects` with normalized boxes and optional simplified contours, retaining each acknowledged frame's cropped, upright source size and CameraX source-to-preview transform.
-- `ScannerScreen` binds preview and analysis in one CameraX `UseCaseGroup` using `PreviewView.viewPort`, transmits that same crop after rotation, then projects its coordinates through the exact per-frame `ImageProxy`-to-`PreviewView` transform before drawing the Canvas outline/contour and `SUBJECT #id` label.
+- `AuraWebSocket` parses up to six current `frame_state.subjects` with normalized boxes and optional simplified contours, retaining each acknowledged full-frame source size and CameraX source-to-preview transform.
+- `ScannerScreen` preserves the original analysis-pixel input format for the YOLO server and reads `PreviewView` transforms only on the UI thread before projecting boxes/contours and temporary `SUBJECT #id` labels. The attempted shared-viewport crop/rotation feed regressed detection and was reverted; physical overlay alignment still needs a dedicated validation pass.
 - The debug APK compiles and is installed. A physical walking-person alignment check is still required before selection is added.
 
 Implement coordinate mapping once. The server frame and PreviewView may have different aspect ratios or rotation; map normalized source coordinates through the exact preview crop/rotation transform before drawing or hit-testing. Test portrait and landscape before spending time on effects.
