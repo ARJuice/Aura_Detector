@@ -3,9 +3,13 @@ package com.auradetector.ui.screens
 import android.Manifest
 import android.animation.ValueAnimator
 import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.AudioTrack
 import android.media.ToneGenerator
 import android.os.Build
+import android.os.Handler
 import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -35,11 +39,16 @@ import androidx.camera.view.transform.ImageProxyTransformFactory
 import androidx.camera.view.transform.OutputTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.lerp
+import kotlin.math.sin
+import kotlin.math.cos
+import kotlin.math.PI
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -55,8 +64,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CutCornerShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke as CanvasStroke
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
@@ -108,7 +125,6 @@ import com.auradetector.ui.theme.OrangeWarning
 import com.auradetector.ui.theme.paletteColor
 import com.auradetector.ui.theme.resultColor
 import java.io.ByteArrayOutputStream
-import java.text.NumberFormat
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicReference
@@ -153,6 +169,8 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
     val scanGenerators = remember { mutableMapOf<Long, AuraScanGenerator>() }
     var soundEnabled by remember { mutableStateOf(true) }
     val latestSoundEnabled = rememberUpdatedState(soundEnabled)
+    var bonusAuraEnabled by remember { mutableStateOf(true) }
+    val latestBonusAuraEnabled = rememberUpdatedState(bonusAuraEnabled)
     val feedback = remember(context) { ScanFeedback(context) }
 
     val particleSystem = remember { ParticleSystem() }
@@ -168,7 +186,16 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
         ),
         label = "breatheAlpha"
     )
-    val scanPulseColor = scanResult?.classification?.let { resultColor(it) } ?: NeonGreen
+    val wavePhase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1600, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "wavePhase"
+    )
+    val scanPulseColor = scanResult?.let { if (it.isPositive) NeonGreen else ErrorRed } ?: NeonGreen
 
     DisposableEffect(feedback) {
         onDispose { feedback.release() }
@@ -250,8 +277,8 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
                 if (scanProgress >= 1f) break
                 delay(80)
             }
-            scanResult = scanGenerators.getOrPut(subjectId) { AuraScanGenerator(subjectId) }.next()
-            delay(4_500)
+            scanResult = scanGenerators.getOrPut(subjectId) { AuraScanGenerator(subjectId) }.initialScan()
+            delay(12_000)
         } finally {
             if (scanningSubjectId == subjectId) {
                 scanningSubjectId = null
@@ -261,14 +288,16 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
         }
     }
     LaunchedEffect(scanResult) {
-        if (scanResult != null) {
-            feedback.scanCompleted(latestSoundEnabled.value)
+        val res = scanResult
+        if (res != null) {
+            val isJackpot = res.rawBonusNumber == "∞" || res.rawBonusNumber == "696969" || res.rawBonusNumber == "676767"
+            feedback.playBonusMemeSound(res.isPositive, isJackpot, latestSoundEnabled.value)
             
             val projected = frameState?.let { projectSubjects(it) }?.firstOrNull { it.subject.id == scanningSubjectId }
             val cx = projected?.box?.center?.x ?: 500f
             val cy = projected?.box?.center?.y ?: 500f
-            val color = scanResult?.classification?.let { resultColor(it) } ?: NeonGreen
-            particleSystem.burst(cx, cy, 25, color)
+            val color = if (res.isPositive) NeonGreen else ErrorRed
+            particleSystem.burst(cx, cy, 35, color)
 
             scanPulseProgress.snapTo(0f)
             scanPulseProgress.animateTo(1f, tween(900))
@@ -288,6 +317,7 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
             selectedSubjectId = selectedSubjectId,
             liveReading = liveReading,
             breatheAlpha = breatheAlpha,
+            wavePhase = wavePhase,
             particleSystem = particleSystem,
             particleTick = particleTick,
             scanPulseProgress = scanPulseProgress.value,
@@ -309,7 +339,22 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
         ScanOverlay(
             subjectId = scanningSubjectId,
             progress = scanProgress,
-            result = scanResult
+            result = scanResult,
+            onRollBonus = {
+                val current = scanResult ?: return@ScanOverlay
+                val subjectId = scanningSubjectId ?: return@ScanOverlay
+                val newResult = scanGenerators.getOrPut(subjectId) { AuraScanGenerator(subjectId) }.rollBonus(current)
+                scanResult = newResult
+                
+                val isJackpot = newResult.rawBonusNumber == "∞" || newResult.rawBonusNumber == "696969" || newResult.rawBonusNumber == "676767"
+                feedback.playBonusMemeSound(newResult.isPositive, isJackpot, latestSoundEnabled.value)
+                
+                val projected = frameState?.let { projectSubjects(it) }?.firstOrNull { it.subject.id == subjectId }
+                val cx = projected?.box?.center?.x ?: 500f
+                val cy = projected?.box?.center?.y ?: 500f
+                val color = if (newResult.isPositive) NeonGreen else ErrorRed
+                particleSystem.burst(cx, cy, 35, color)
+            }
         )
         
         val subjectCount = frameState?.subjects?.size ?: 0
@@ -327,9 +372,11 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
                 else -> null
             },
             soundEnabled = soundEnabled,
+            bonusAuraEnabled = bonusAuraEnabled,
             subjectCount = subjectCount,
             subjectColor = hudSubjectColor,
             onToggleSound = { soundEnabled = !soundEnabled },
+            onToggleBonusAura = { bonusAuraEnabled = !bonusAuraEnabled },
             onExit = onExit
         )
     }
@@ -443,6 +490,7 @@ private fun SubjectOverlay(
     selectedSubjectId: Long?,
     liveReading: String?,
     breatheAlpha: Float,
+    wavePhase: Float,
     particleSystem: ParticleSystem,
     particleTick: Int,
     scanPulseProgress: Float,
@@ -503,69 +551,91 @@ private fun SubjectOverlay(
             val top = projected.box.top
             val right = projected.box.right
             val bottom = projected.box.bottom
+            val boxWidth = right - left
+            val boxHeight = bottom - top
             val selected = subject.id == selectedSubjectId
             val baseColor = paletteColor(subject.profile?.palette)
-            val color = if (selected) baseColor else baseColor.copy(alpha = 0.7f)
+            val color = if (selected) baseColor else baseColor.copy(alpha = 0.75f)
             val contour = projected.contour
 
-            val layers = listOf(
-                28f to 0.05f * breatheAlpha,
-                18f to 0.10f * breatheAlpha,
-                9f to 0.18f * breatheAlpha,
-                3f to 0.30f * breatheAlpha
-            )
+            val alphaMult = if (selected) 1.6f else 1.0f
 
-            val alphaMult = if (selected) 1.8f else 1.0f
+            // 1. OUTWARD RADIATING DIVINE WAVES (FLUID & WAVY STROKES ONLY - NO INSIDE FILL!)
+            val numWaves = 5
+            val maxExpand = if (selected) 42.dp.toPx() else 30.dp.toPx()
 
-            if (contour.size >= 3) {
-                val cx = contour.map { it.x }.average().toFloat()
-                val cy = contour.map { it.y }.average().toFloat()
+            for (w in 0 until numWaves) {
+                val waveOffsetFrac = (wavePhase + w.toFloat() / numWaves) % 1.0f
+                val expandPx = 2.dp.toPx() + waveOffsetFrac * maxExpand
                 
-                for ((expand, alpha) in layers) {
-                    val finalAlpha = (alpha * alphaMult).coerceAtMost(0.5f)
-                    val path = Path().apply {
-                        val first = contour.first()
-                        val dx = first.x - cx
-                        val dy = first.y - cy
-                        val dist = kotlin.math.hypot(dx, dy)
-                        val scale = if (dist > 0) (dist + expand) / dist else 1f
-                        moveTo(cx + dx * scale, cy + dy * scale)
-                        contour.drop(1).forEach { pt ->
+                val bellCurve = sin(waveOffsetFrac * Math.PI.toFloat())
+                val waveAlpha = (0.40f * bellCurve * breatheAlpha * alphaMult).coerceIn(0f, 0.65f)
+                val strokeW = (1.5.dp.toPx() + waveOffsetFrac * 3.5.dp.toPx())
+
+                val waveColor = if (waveOffsetFrac < 0.18f) {
+                    lerp(AuraWhiteHot, baseColor, waveOffsetFrac / 0.18f)
+                } else {
+                    color
+                }
+
+                if (contour.size >= 3) {
+                    val cx = contour.map { it.x }.average().toFloat()
+                    val cy = contour.map { it.y }.average().toFloat()
+                    val wavePath = Path().apply {
+                        contour.forEachIndexed { idx, pt ->
                             val pdx = pt.x - cx
                             val pdy = pt.y - cy
+                            val angle = kotlin.math.atan2(pdy, pdx)
                             val pdist = kotlin.math.hypot(pdx, pdy)
-                            val pscale = if (pdist > 0) (pdist + expand) / pdist else 1f
-                            lineTo(cx + pdx * pscale, cy + pdy * pscale)
+                            
+                            // Fluid organic wave modulation around the perimeter
+                            val ripple = sin(angle * 3f + wavePhase * (2f * PI.toFloat()) + w * 0.7f) * 3.5.dp.toPx()
+                            val totalExpand = expandPx + ripple
+                            val pscale = if (pdist > 0) (pdist + totalExpand) / pdist else 1f
+                            val vx = cx + pdx * pscale
+                            val vy = cy + pdy * pscale
+                            
+                            if (idx == 0) moveTo(vx, vy) else lineTo(vx, vy)
                         }
                         close()
                     }
-                    drawPath(path, color.copy(alpha = finalAlpha), style = Fill)
+                    drawPath(wavePath, waveColor.copy(alpha = waveAlpha), style = CanvasStroke(strokeW))
+                } else {
+                    val boxWobble = sin(wavePhase * (2f * PI.toFloat()) * 2f + w * 0.8f) * 2.5.dp.toPx()
+                    val totalExpand = expandPx + boxWobble
+                    drawRoundRect(
+                        color = waveColor.copy(alpha = waveAlpha),
+                        topLeft = Offset(left - totalExpand, top - totalExpand),
+                        size = Size(boxWidth + totalExpand * 2, boxHeight + totalExpand * 2),
+                        cornerRadius = CornerRadius(20.dp.toPx() + totalExpand * 0.4f),
+                        style = CanvasStroke(strokeW)
+                    )
                 }
-                
+            }
+
+            // 2. CRISP CORE OUTLINE (UNFILLED INTERIOR - Person remains 100% visible!)
+            if (contour.size >= 3) {
                 val crispPath = Path().apply {
                     moveTo(contour.first().x, contour.first().y)
                     contour.drop(1).forEach { lineTo(it.x, it.y) }
                     close()
                 }
-                drawPath(crispPath, baseColor, style = Stroke(2.5.dp.toPx()))
-
+                drawPath(crispPath, baseColor.copy(alpha = 0.45f * breatheAlpha), style = CanvasStroke(4.dp.toPx()))
+                drawPath(crispPath, if (selected) AuraWhiteHot else baseColor, style = CanvasStroke(2.dp.toPx()))
             } else {
-                for ((expand, alpha) in layers) {
-                    val finalAlpha = (alpha * alphaMult).coerceAtMost(0.5f)
-                    drawRoundRect(
-                        color = color.copy(alpha = finalAlpha),
-                        topLeft = Offset(left - expand, top - expand),
-                        size = Size(right - left + expand * 2, bottom - top + expand * 2),
-                        cornerRadius = CornerRadius(20.dp.toPx()),
-                        style = Fill
-                    )
-                }
                 drawRoundRect(
-                    color = baseColor,
+                    color = baseColor.copy(alpha = 0.45f * breatheAlpha),
                     topLeft = Offset(left, top),
-                    size = Size(right - left, bottom - top),
+                    size = Size(boxWidth, boxHeight),
                     cornerRadius = CornerRadius(20.dp.toPx()),
-                    style = Stroke(2.5.dp.toPx())
+                    style = CanvasStroke(4.dp.toPx())
+                )
+                drawRoundRect(
+                    color = if (selected) AuraWhiteHot else baseColor,
+                    topLeft = Offset(left, top),
+                    size = Size(boxWidth, boxHeight),
+                    cornerRadius = CornerRadius(20.dp.toPx()),
+                    style = CanvasStroke(2.dp.toPx())
                 )
             }
 
@@ -687,15 +757,23 @@ private class ParticleSystem {
         for (projected in subjects) {
             if (particles.size >= maxParticles) break
             val box = projected.box
+            val cx = box.center.x
+            val cy = box.center.y
             val color = paletteColor(projected.subject.profile?.palette)
-            repeat(if (Random.nextFloat() < 0.3f) 1 else 0) {
+            if (Random.nextFloat() < 0.4f) {
+                val angle = Random.nextFloat() * 2f * kotlin.math.PI.toFloat()
+                val radiusX = box.width * 0.5f
+                val radiusY = box.height * 0.5f
+                val spawnX = cx + kotlin.math.cos(angle) * radiusX
+                val spawnY = cy + kotlin.math.sin(angle) * radiusY
+                val speed = Random.nextFloat() * 35f + 15f
                 particles.add(Particle(
-                    x = box.left + Random.nextFloat() * box.width,
-                    y = box.bottom - Random.nextFloat() * box.height * 0.3f,
-                    vx = Random.nextFloat() * 20f - 10f,
-                    vy = -(Random.nextFloat() * 40f + 15f),
+                    x = spawnX,
+                    y = spawnY,
+                    vx = kotlin.math.cos(angle) * speed,
+                    vy = kotlin.math.sin(angle) * speed,
                     life = 1f,
-                    maxLife = Random.nextFloat() * 1.2f + 0.6f,
+                    maxLife = Random.nextFloat() * 1.0f + 0.4f,
                     size = Random.nextFloat() * 3.5f + 1.5f,
                     color = color
                 ))
@@ -793,9 +871,11 @@ private fun pointInPolygon(point: Offset, polygon: List<Offset>): Boolean {
 
 private data class AuraScanResult(
     val base: String,
-    val modifier: String,
+    val bonusValue: String? = null,
+    val isPositive: Boolean = true,
     val final: String,
-    val classification: String
+    val classification: String,
+    val rawBonusNumber: String? = null
 )
 
 private class ScanFeedback(context: Context) {
@@ -815,6 +895,69 @@ private class ScanFeedback(context: Context) {
     fun scanCompleted(soundEnabled: Boolean) {
         vibrate(longArrayOf(0, 40, 60, 40, 60, 100), -1)
         if (soundEnabled) toneGenerator.startTone(ToneGenerator.TONE_PROP_ACK, 250)
+    }
+
+    fun playBonusMemeSound(isPositive: Boolean, isJackpot: Boolean, soundEnabled: Boolean) {
+        if (!soundEnabled) return
+        try {
+            val sampleRate = 22050
+            val durationMs = if (isJackpot) 750 else 420
+            val numSamples = sampleRate * durationMs / 1000
+            val samples = ShortArray(numSamples)
+
+            val freqs = if (isPositive) {
+                if (isJackpot) floatArrayOf(523.25f, 659.25f, 783.99f, 1046.50f)
+                else floatArrayOf(523.25f, 659.25f, 783.99f)
+            } else {
+                if (isJackpot) floatArrayOf(349.23f, 329.63f, 311.13f, 261.63f)
+                else floatArrayOf(349.23f, 293.66f, 246.94f)
+            }
+
+            val samplesPerNote = numSamples / freqs.size
+            var sampleIdx = 0
+            for (f in freqs) {
+                val period = sampleRate / f
+                for (i in 0 until samplesPerNote) {
+                    if (sampleIdx >= numSamples) break
+                    val angle = 2.0 * Math.PI * i / period
+                    val valSine = Math.sin(angle)
+                    val valSq = if (valSine > 0) 0.5 else -0.5
+                    val envelope = (1.0 - i.toDouble() / samplesPerNote).coerceIn(0.0, 1.0)
+                    val sampleVal = ((valSine * 0.4 + valSq * 0.6) * envelope * 22000).toInt()
+                    samples[sampleIdx++] = sampleVal.toShort()
+                }
+            }
+
+            val audioTrack = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_GAME)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(numSamples * 2)
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .build()
+
+            audioTrack.write(samples, 0, numSamples)
+            audioTrack.play()
+
+            Handler(Looper.getMainLooper()).postDelayed({
+                try { audioTrack.release() } catch (_: Exception) {}
+            }, durationMs + 250L)
+
+        } catch (e: Exception) {
+            Log.w("AuraDetector", "Fallback for bonus sound", e)
+            if (isPositive) toneGenerator.startTone(ToneGenerator.TONE_DTMF_A, 300)
+            else toneGenerator.startTone(ToneGenerator.TONE_PROP_NACK, 300)
+        }
     }
 
     fun geigerTick(soundEnabled: Boolean) {
@@ -839,124 +982,78 @@ private class ScanFeedback(context: Context) {
 private class AuraScanGenerator(subjectId: Long) {
     private val random = Random(subjectId.toInt() xor 0x51A7C0DE)
 
-    fun next(): AuraScanResult {
-        val roll = random.nextDouble()
-        if (roll < 0.015) {
-            return AuraScanResult(
-                base = "+∞",
-                modifier = "CURSE −1,000 AUR",
-                final = "+∞",
-                classification = "AURA OVERFLOW"
-            )
-        }
-        if (roll < 0.03) {
-            return AuraScanResult(
-                base = "−∞",
-                modifier = "BLESSING +184 AUR",
-                final = "−∞",
-                classification = "NEGATIVE AURA SINGULARITY"
-            )
-        }
+    fun initialScan(): AuraScanResult {
+        // 1 in 10 chance (10%) to get one of the special meme aura values
+        val isSpecialRoll = random.nextDouble() < 0.10
+        val isPositive = random.nextDouble() < 0.60 // 60% positive / 40% negative
+        val signStr = if (isPositive) "+" else "−"
 
-        val baseMagnitude = when {
-            roll < 0.58 -> random.nextLong(1, 1_001)
-            roll < 0.88 -> random.nextLong(5_000, 100_001)
-            roll < 0.99 -> random.nextLong(100_000, 1_000_001)
-            else -> 67_696_969L
-        }
-        val base = if (random.nextBoolean()) baseMagnitude else -baseMagnitude
-        val modifierMagnitude = random.nextLong(100, 2_001)
-        val modifier = if (random.nextBoolean()) modifierMagnitude else -modifierMagnitude
-        val final = base + modifier
-        val classification = when {
-            kotlin.math.abs(final) >= 1_000_000 -> "EXTREME FIELD"
-            baseMagnitude == 67_696_969L -> "MILESTONE SIGNAL"
-            final >= 0 -> "RADIANT"
-            else -> "VOID-ADJACENT"
-        }
-        return AuraScanResult(
-            base = signed(base),
-            modifier = "${if (modifier >= 0) "BLESSING" else "CURSE"} ${signed(modifier)} AUR",
-            final = signed(final),
-            classification = classification
-        )
-    }
+        if (isSpecialRoll) {
+            val specialValues = listOf("∞", "100000", "5000", "1000", "67", "69", "1", "0")
+            val chosen = specialValues[random.nextInt(specialValues.size)]
+            val formattedVal = if (chosen == "0") "0 AUR/s" else "$signStr$chosen AUR/s"
 
-    private fun signed(value: Long): String =
-        "${if (value >= 0) "+" else "−"}${NumberFormat.getIntegerInstance(Locale.US).format(kotlin.math.abs(value))}"
-}
-
-@Composable
-private fun ScanOverlay(subjectId: Long?, progress: Float, result: AuraScanResult?) {
-    if (subjectId == null) return
-    val animationsEnabled = remember { ValueAnimator.areAnimatorsEnabled() }
-    val scanPulse = if (animationsEnabled && result == null) {
-        val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "scanPulse")
-        val pulse by transition.animateFloat(
-            initialValue = 0.35f,
-            targetValue = 0.95f,
-            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                animation = androidx.compose.animation.core.tween(420),
-                repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
-            ),
-            label = "scanPulseAlpha"
-        )
-        pulse
-    } else {
-        1f
-    }
-
-    val resColor = result?.classification?.let { resultColor(it) } ?: NeonGreen
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(top = 180.dp, bottom = 190.dp)
-            .zIndex(10f),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp)
-                .then(
-                    if (result != null) {
-                        Modifier
-                            .border(6.dp, resColor.copy(alpha = 0.15f))
-                            .border(4.dp, resColor.copy(alpha = 0.3f))
-                    } else Modifier
-                )
-                .background(DarkNavy.copy(alpha = if (result == null) 0.90f + scanPulse * 0.04f else 0.94f))
-                .border(2.dp, (if (result == null) OrangeWarning.copy(alpha = scanPulse) else resColor))
-                .padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            if (result == null) {
-                Text("SCANNING SUBJECT #$subjectId", color = OrangeWarning)
-                Text("CALIBRATING ${(progress * 100).toInt()}%", color = CyanAccent)
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .background(CyanAccent.copy(alpha = 0.18f))
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(progress.coerceIn(0f, 1f))
-                            .height(8.dp)
-                            .background(OrangeWarning.copy(alpha = scanPulse))
-                    )
-                }
-                Text("NEGOTIATING WITH THE FIELD", color = CyanAccent)
-            } else {
-                Text("AURA SCAN COMPLETE", color = resColor)
-                Text("BASE: ${result.base}", color = CyanAccent)
-                Text(result.modifier, color = CyanAccent)
-                Text("FINAL: ${result.final}", color = resColor)
-                Text(result.classification, color = resColor)
+            val classification = when (chosen) {
+                "∞" -> if (isPositive) "INFINITE OVERFLOW" else "VOID SINGULARITY"
+                "100000" -> if (isPositive) "CRITICAL PEAK RADIANCE" else "CRITICAL DRAIN"
+                "5000" -> if (isPositive) "HIGH ENERGY PULSE" else "FIELD COLLAPSE"
+                "1000" -> if (isPositive) "STABLE HARMONIC" else "HARMONIC DRAIN"
+                "67" -> if (isPositive) "RESONANCE SIGNAL 67" else "CURSE SIGNAL 67"
+                "69" -> if (isPositive) "NICE SPECTRUM 69" else "NICE DRAIN 69"
+                "1" -> if (isPositive) "SOLITARY TRACE" else "SOLITARY DRAIN"
+                else -> "NULL FIELD READOUT"
             }
+
+            return AuraScanResult(
+                base = formattedVal,
+                bonusValue = null,
+                isPositive = isPositive,
+                final = formattedVal,
+                classification = classification,
+                rawBonusNumber = chosen
+            )
         }
+
+        // Standard random readout (no commas!)
+        val baseVal = random.nextLong(100, 40_000)
+        val formattedBase = "$signStr$baseVal AUR/s"
+        return AuraScanResult(
+            base = formattedBase,
+            bonusValue = null,
+            isPositive = isPositive,
+            final = formattedBase,
+            classification = if (isPositive) "READOUT CALIBRATED" else "SPECTRUM DRAIN",
+            rawBonusNumber = baseVal.toString()
+        )
+    }
+
+    fun rollBonus(currentResult: AuraScanResult): AuraScanResult {
+        // 40% Curse (Negative) / 60% Blessing (Positive) split per user specification
+        val isPositive = random.nextDouble() < 0.60
+
+        // Strict fixed set: 67, 696969, ∞, 676767, 100000, 1
+        val fixedValues = listOf("67", "696969", "∞", "676767", "100000", "1")
+        val chosenValueStr = fixedValues[random.nextInt(fixedValues.size)]
+
+        val signStr = if (isPositive) "+" else "−"
+        val bonusFormatted = "$signStr$chosenValueStr AURA"
+
+        val classification = when (chosenValueStr) {
+            "∞" -> if (isPositive) "INFINITE OVERFLOW" else "VOID SINGULARITY"
+            "696969" -> if (isPositive) "NICE OVERDRIVE (+696969)" else "NICE CURSE DRAIN (−696969)"
+            "676767" -> if (isPositive) "SUPREME SPECTRUM (+676767)" else "CATACLYSMIC DRAIN (−676767)"
+            "100000" -> if (isPositive) "MAJOR RADIANCE (+100000)" else "MAJOR FIELD DRAIN (−100000)"
+            "67" -> if (isPositive) "BONUS FIELD (+67)" else "FIELD CURSE (−67)"
+            else -> if (isPositive) "SOLITARY AURA (+1)" else "SINGLE DROP CURSE (−1)"
+        }
+
+        return currentResult.copy(
+            bonusValue = bonusFormatted,
+            isPositive = isPositive,
+            final = bonusFormatted,
+            classification = classification,
+            rawBonusNumber = chosenValueStr
+        )
     }
 }
 
@@ -991,7 +1088,247 @@ private class AuraValueGenerator(subjectId: Long) {
     }
 
     private fun format(value: Double): String =
-        "${NumberFormat.getIntegerInstance(Locale.US).format(value)} AUR/s"
+        "${value.toLong()} AUR/s"
+}
+
+@Composable
+private fun ScanOverlay(
+    subjectId: Long?,
+    progress: Float,
+    result: AuraScanResult?,
+    onRollBonus: () -> Unit
+) {
+    if (subjectId == null) return
+    val transition = rememberInfiniteTransition(label = "scanPulse")
+    val pulseAlpha by transition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(450, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "scanPulseAlpha"
+    )
+    val rotateAngle by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "rotateAngle"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(10f),
+        contentAlignment = Alignment.Center
+    ) {
+        if (result == null) {
+            // High-Tech Bio-Scanner UI
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.padding(24.dp)
+            ) {
+                // Central Glowing Scanning Arc Ring
+                Box(
+                    modifier = Modifier.size(130.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val strokeW = 4.dp.toPx()
+                        // Outer background ring track
+                        drawCircle(
+                            color = OrangeWarning.copy(alpha = 0.15f),
+                            style = CanvasStroke(strokeW)
+                        )
+                        // Progress arc
+                        drawArc(
+                            brush = Brush.sweepGradient(
+                                listOf(OrangeWarning.copy(alpha = 0.3f), OrangeWarning, CyanAccent)
+                            ),
+                            startAngle = rotateAngle,
+                            sweepAngle = (progress * 360f).coerceIn(10f, 360f),
+                            useCenter = false,
+                            style = CanvasStroke(strokeW, cap = StrokeCap.Round)
+                        )
+                        // Inner reticle ring
+                        drawCircle(
+                            color = CyanAccent.copy(alpha = 0.25f * pulseAlpha),
+                            radius = size.minDimension * 0.35f,
+                            style = CanvasStroke(1.5.dp.toPx())
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "${(progress * 100).toInt()}%",
+                            color = OrangeWarning
+                        )
+                        Text(
+                            text = "ANALYZING",
+                            color = CyanAccent.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+
+                // Sleek Glassmorphism Info Badge
+                Column(
+                    modifier = Modifier
+                        .background(
+                            DarkNavy.copy(alpha = 0.92f),
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                        .border(
+                            1.5.dp,
+                            Brush.horizontalGradient(
+                                listOf(OrangeWarning.copy(alpha = pulseAlpha), CyanAccent.copy(alpha = pulseAlpha))
+                            ),
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                        .padding(horizontal = 24.dp, vertical = 14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text("AURA SCAN IN PROGRESS", color = OrangeWarning)
+                    Text("TARGET: SUBJECT #$subjectId", color = CyanAccent)
+                    
+                    val phaseMsg = when {
+                        progress < 0.3f -> "Calibrating Spectrum Band..."
+                        progress < 0.7f -> "Sampling Quantum Field..."
+                        else -> "Resolving Matrix Profile..."
+                    }
+                    Text(phaseMsg, color = CyanAccent.copy(alpha = 0.75f))
+
+                    // Gradient Progress Bar
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.85f)
+                            .height(6.dp)
+                            .background(CyanAccent.copy(alpha = 0.15f), shape = CircleShape)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(progress.coerceIn(0f, 1f))
+                                .height(6.dp)
+                                .background(
+                                    Brush.horizontalGradient(listOf(OrangeWarning, CyanAccent)),
+                                    shape = CircleShape
+                                )
+                        )
+                    }
+                }
+            }
+        } else {
+            // Scan Complete Result Card - Interactive Random Bonus Button inside!
+            val hasBonus = result.bonusValue != null
+            val auraColor = if (!hasBonus) CyanAccent else if (result.isPositive) NeonGreen else ErrorRed
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth(0.92f)
+                    .background(DarkNavy.copy(alpha = 0.96f), shape = RoundedCornerShape(20.dp))
+                    .border(2.5.dp, auraColor, shape = RoundedCornerShape(20.dp))
+                    .padding(22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Header Badge
+                Box(
+                    modifier = Modifier
+                        .background(auraColor.copy(alpha = 0.2f), shape = RoundedCornerShape(10.dp))
+                        .border(1.2.dp, auraColor, shape = RoundedCornerShape(10.dp))
+                        .padding(horizontal = 16.dp, vertical = 5.dp)
+                ) {
+                    Text(
+                        text = if (!hasBonus) "★ AURA SCAN COMPLETE ★" else if (result.isPositive) "★ BLESSING GRANTED ★" else "☠ CURSE INFLICTED ☠",
+                        color = auraColor,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                if (hasBonus) {
+                    // ICONIC GIANT MEME AURA BONUS READOUT
+                    Text(
+                        text = result.bonusValue!!,
+                        color = auraColor,
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                } else {
+                    Text(
+                        text = result.base,
+                        color = CyanAccent,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Text(
+                    text = result.classification,
+                    color = CyanAccent.copy(alpha = 0.85f),
+                    fontWeight = FontWeight.Medium
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(auraColor.copy(alpha = 0.4f))
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("BASELINE READOUT", color = CyanAccent.copy(alpha = 0.7f))
+                    Text(result.base, color = CyanAccent)
+                }
+
+                if (hasBonus) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("RANDOM BONUS ROLL", color = CyanAccent.copy(alpha = 0.7f))
+                        Text(
+                            text = result.bonusValue!!,
+                            color = auraColor,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // INTERACTIVE RANDOM BONUS BUTTON INSIDE POPUP CARD!
+                Button(
+                    onClick = onRollBonus,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (hasBonus) auraColor.copy(alpha = 0.25f) else OrangeWarning.copy(alpha = 0.3f)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(
+                            1.5.dp,
+                            if (hasBonus) auraColor else OrangeWarning,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                ) {
+                    Text(
+                        text = if (hasBonus) "🎲 RE-ROLL RANDOM BONUS" else "🎲 ROLL RANDOM BONUS",
+                        color = if (hasBonus) auraColor else OrangeWarning,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                }
+            }
+        }
+    }
 }
 
 private fun ImageProxy.sourceToPreviewMatrix(
@@ -1014,9 +1351,11 @@ private fun ScannerHud(
     liveReading: String?,
     scanStatus: String?,
     soundEnabled: Boolean,
+    bonusAuraEnabled: Boolean,
     subjectCount: Int,
     subjectColor: Color,
     onToggleSound: () -> Unit,
+    onToggleBonusAura: () -> Unit,
     onExit: () -> Unit
 ) {
     val statusColor = when (status.state) {
@@ -1027,13 +1366,20 @@ private fun ScannerHud(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        // TOP HUD BAR - Safe Window Inset Padded (Notch & Status bar safe!)
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .background(DarkNavy.copy(alpha = 0.9f))
-                .padding(12.dp)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(DarkNavy.copy(alpha = 0.96f), DarkNavy.copy(alpha = 0.88f))
+                    )
+                )
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
+            // Header Row: Title & Connection Status
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1046,58 +1392,125 @@ private fun ScannerHud(
                     Text(status.detail, color = statusColor)
                 }
             }
+            
             Spacer(modifier = Modifier.height(4.dp))
+            
+            // Sub-metrics Row
             val metrics = buildString {
                 status.lastFrameId?.let { append("FRAME: $it  ") }
                 status.latencyMs?.let { append("${it}ms  ") }
                 append("SUBJECTS: $subjectCount")
             }
-            Text(metrics, color = CyanAccent.copy(alpha = 0.7f))
-        }
+            Text(metrics, color = CyanAccent.copy(alpha = 0.65f))
 
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 62.dp)
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(statusColor)
-        )
+            // INTEGRATED FIELD METER GAUGE (Safe & Non-overflowing!)
+            if (selectedSubjectId != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            "SUBJ #$selectedSubjectId",
+                            color = subjectColor,
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                        
+                        // Parse reading fraction for live meter
+                        val valDouble = liveReading?.replace(",", "")
+                            ?.replace(" AUR/s", "")
+                            ?.trim()
+                            ?.toDoubleOrNull() ?: 0.0
+                        val frac = if (valDouble > 0) {
+                            (kotlin.math.ln(valDouble + 1.0) / kotlin.math.ln(100_000.0)).coerceIn(0.05, 1.0).toFloat()
+                        } else 0f
 
-        if (selectedSubjectId != null) {
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(top = 74.dp, start = 16.dp)
-                    .background(DarkNavy.copy(alpha = 0.85f))
-                    .border(1.dp, subjectColor)
-                    .padding(8.dp)
-            ) {
-                Text("SUBJECT #$selectedSubjectId", color = subjectColor)
-                if (liveReading != null) {
-                    Text(liveReading, color = CyanAccent)
+                        // Meter bar track
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(6.dp)
+                                .background(DarkNavy, shape = CircleShape)
+                                .border(0.8.dp, subjectColor.copy(alpha = 0.5f), shape = CircleShape)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(frac)
+                                    .height(6.dp)
+                                    .background(
+                                        Brush.horizontalGradient(
+                                            listOf(CyanAccent, subjectColor, AuraWhiteHot)
+                                        ),
+                                        shape = CircleShape
+                                    )
+                            )
+                        }
+                    }
+
+                    if (liveReading != null) {
+                        Text(
+                            liveReading,
+                            color = CyanAccent,
+                            modifier = Modifier.padding(start = 10.dp)
+                        )
+                    }
                 }
             }
+
+            Spacer(modifier = Modifier.height(6.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(statusColor.copy(alpha = 0.6f))
+            )
         }
 
+        // BOTTOM CONTROLS BAR - Safe Navigation Bar Padded
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
+                .navigationBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Button(
                 onClick = onToggleSound,
+                shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DarkNavy.copy(alpha = 0.90f)),
-                modifier = Modifier.border(1.dp, CyanAccent)
+                modifier = Modifier.border(1.dp, CyanAccent, RoundedCornerShape(12.dp))
             ) {
                 Text(if (soundEnabled) "SOUND ON" else "SOUND OFF", color = CyanAccent)
             }
+
+            Button(
+                onClick = onToggleBonusAura,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = DarkNavy.copy(alpha = 0.90f)),
+                modifier = Modifier.border(
+                    1.dp,
+                    if (bonusAuraEnabled) NeonGreen else CyanAccent.copy(alpha = 0.5f),
+                    RoundedCornerShape(12.dp)
+                )
+            ) {
+                Text(
+                    if (bonusAuraEnabled) "BONUS: ON" else "BONUS: OFF",
+                    color = if (bonusAuraEnabled) NeonGreen else CyanAccent.copy(alpha = 0.7f)
+                )
+            }
+
             Button(
                 onClick = onExit,
+                shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DarkNavy.copy(alpha = 0.90f)),
-                modifier = Modifier.border(1.dp, ErrorRed)
+                modifier = Modifier.border(1.dp, ErrorRed, RoundedCornerShape(12.dp))
             ) {
                 Text("DISCONNECT", color = ErrorRed)
             }
