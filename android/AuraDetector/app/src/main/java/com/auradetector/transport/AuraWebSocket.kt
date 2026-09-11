@@ -16,6 +16,7 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 enum class VisionLinkState { CONNECTING, READY, DEGRADED, OFFLINE }
 
@@ -24,6 +25,33 @@ data class TransportStatus(
     val detail: String = "Connecting…",
     val lastFrameId: Long? = null,
     val latencyMs: Long? = null
+)
+
+data class VisionPoint(val x: Float, val y: Float)
+
+data class VisionSubject(
+    val id: Long,
+    val confidence: Float,
+    val x: Float,
+    val y: Float,
+    val width: Float,
+    val height: Float,
+    val contour: List<VisionPoint>
+)
+
+data class VisionFrameState(
+    val frameId: Long,
+    val sourceWidth: Int,
+    val sourceHeight: Int,
+    val rotationDegrees: Int,
+    val subjects: List<VisionSubject>
+)
+
+private data class SentFrame(
+    val id: Long,
+    val width: Int,
+    val height: Int,
+    val rotationDegrees: Int
 )
 
 /**
@@ -44,10 +72,13 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
     private val helloAcknowledged = AtomicBoolean(false)
     private val frameSentAtMs = AtomicLong(0)
     private val lastFrameSentAtMs = AtomicLong(0)
+    private val inFlightFrame = AtomicReference<SentFrame?>(null)
     private var webSocket: WebSocket? = null
 
     private val _status = MutableStateFlow(TransportStatus())
     val status = _status.asStateFlow()
+    private val _frameState = MutableStateFlow<VisionFrameState?>(null)
+    val frameState = _frameState.asStateFlow()
 
     fun connect() {
         _status.value = TransportStatus(VisionLinkState.CONNECTING, "Connecting…")
@@ -68,22 +99,25 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
                 }
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    _frameState.value = null
                     _status.value = TransportStatus(VisionLinkState.OFFLINE, "Socket closing: $reason")
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    _frameState.value = null
                     _status.value = TransportStatus(VisionLinkState.OFFLINE, "Socket closed: $reason")
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     awaitingFrameState.set(false)
+                    _frameState.value = null
                     _status.value = TransportStatus(VisionLinkState.OFFLINE, t.message ?: "Connection failed")
                 }
             }
         )
     }
 
-    fun sendFrame(jpeg: ByteArray, width: Int, height: Int): Boolean {
+    fun sendFrame(jpeg: ByteArray, width: Int, height: Int, rotationDegrees: Int): Boolean {
         val now = SystemClock.elapsedRealtime()
         if (!helloAcknowledged.get() || now - lastFrameSentAtMs.get() < MIN_FRAME_INTERVAL_MS) return false
         if (!awaitingFrameState.compareAndSet(false, true)) return false
@@ -101,7 +135,9 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
             .put("jpeg", Base64.encodeToString(jpeg, Base64.NO_WRAP))
 
         val socket = webSocket
+        inFlightFrame.set(SentFrame(id, width, height, rotationDegrees))
         if (socket == null || !socket.send(message.toString())) {
+            inFlightFrame.set(null)
             awaitingFrameState.set(false)
             _status.value = TransportStatus(VisionLinkState.OFFLINE, "Frame send failed")
             return false
@@ -124,6 +160,16 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
                 if (id > lastAcceptedFrameId.get()) {
                     lastAcceptedFrameId.set(id)
                     awaitingFrameState.set(false)
+                    val sentFrame = inFlightFrame.getAndSet(null)
+                    if (sentFrame?.id == id) {
+                        _frameState.value = VisionFrameState(
+                            frameId = id,
+                            sourceWidth = sentFrame.width,
+                            sourceHeight = sentFrame.height,
+                            rotationDegrees = sentFrame.rotationDegrees,
+                            subjects = parseSubjects(message.optJSONArray("subjects"))
+                        )
+                    }
                     _status.value = TransportStatus(
                         state = VisionLinkState.READY,
                         detail = "LINK: OK",
@@ -134,6 +180,7 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
             }
             "error" -> {
                 awaitingFrameState.set(false)
+                _frameState.value = null
                 val recoverable = message.optBoolean("recoverable", false)
                 _status.value = TransportStatus(
                     if (recoverable) VisionLinkState.DEGRADED else VisionLinkState.OFFLINE,
@@ -145,8 +192,47 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
     }
 
     override fun close() {
+        _frameState.value = null
         webSocket?.close(1000, "Scanner closed")
         client.dispatcher.executorService.shutdown()
         client.connectionPool.evictAll()
+    }
+
+    private fun parseSubjects(subjects: org.json.JSONArray?): List<VisionSubject> {
+        if (subjects == null) return emptyList()
+        return buildList {
+            for (index in 0 until minOf(subjects.length(), 6)) {
+                val subject = subjects.optJSONObject(index) ?: continue
+                val box = subject.optJSONArray("box") ?: continue
+                if (!subject.has("id") || box.length() < 4) continue
+
+                val values = FloatArray(4) { position -> box.optDouble(position, Double.NaN).toFloat() }
+                if (values.any { !it.isFinite() || it < 0f || it > 1f }) continue
+                val contour = subject.optJSONArray("contour")?.let(::parseContour).orEmpty()
+                add(
+                    VisionSubject(
+                        id = subject.optLong("id"),
+                        confidence = subject.optDouble("confidence", 0.0).toFloat(),
+                        x = values[0],
+                        y = values[1],
+                        width = values[2],
+                        height = values[3],
+                        contour = contour
+                    )
+                )
+            }
+        }
+    }
+
+    private fun parseContour(points: org.json.JSONArray): List<VisionPoint> = buildList {
+        for (index in 0 until minOf(points.length(), 96)) {
+            val point = points.optJSONArray(index) ?: continue
+            if (point.length() < 2) continue
+            val x = point.optDouble(0, Double.NaN).toFloat()
+            val y = point.optDouble(1, Double.NaN).toFloat()
+            if (x.isFinite() && y.isFinite() && x in 0f..1f && y in 0f..1f) {
+                add(VisionPoint(x, y))
+            }
+        }
     }
 }

@@ -2,11 +2,13 @@ package com.auradetector.ui.screens
 
 import android.Manifest
 import android.content.Context
+import android.graphics.Paint
+import android.graphics.Typeface
 import android.content.pm.PackageManager
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
-import android.util.Size
+import android.util.Size as AndroidSize
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -16,6 +18,7 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -37,7 +40,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
@@ -46,6 +57,8 @@ import androidx.core.content.ContextCompat
 import com.auradetector.data.ServerConfig
 import com.auradetector.transport.AuraWebSocket
 import com.auradetector.transport.TransportStatus
+import com.auradetector.transport.VisionFrameState
+import com.auradetector.transport.VisionPoint
 import com.auradetector.transport.VisionLinkState
 import com.auradetector.ui.theme.CyanAccent
 import com.auradetector.ui.theme.DarkNavy
@@ -78,13 +91,17 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
 
     val transport = remember(config) { AuraWebSocket(config) }
     val status by transport.status.collectAsState()
+    val frameState by transport.frameState.collectAsState()
     DisposableEffect(transport) {
         transport.connect()
         onDispose { transport.close() }
     }
 
-    CameraTransportPreview(transport)
-    ScannerHud(status = status, onExit = onExit)
+    Box(modifier = Modifier.fillMaxSize()) {
+        CameraTransportPreview(transport)
+        SubjectOverlay(frameState)
+        ScannerHud(status = status, onExit = onExit)
+    }
     BackHandler(onBack = onExit)
 }
 
@@ -104,13 +121,18 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
             }
             val analysis = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .setTargetResolution(Size(640, 360))
+                .setTargetResolution(AndroidSize(640, 360))
                 .build()
                 .also { imageAnalysis ->
                     imageAnalysis.setAnalyzer(analyzerExecutor) { image ->
                         try {
                             val frame = image.toJpeg()
-                            transport.sendFrame(frame.bytes, frame.width, frame.height)
+                            transport.sendFrame(
+                                frame.bytes,
+                                frame.width,
+                                frame.height,
+                                image.imageInfo.rotationDegrees
+                            )
                         } finally {
                             image.close()
                         }
@@ -134,6 +156,94 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
     }
 
     AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+}
+
+@Composable
+private fun SubjectOverlay(frameState: VisionFrameState?) {
+    if (frameState == null || frameState.subjects.isEmpty()) return
+
+    val labelPaint = remember {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        }
+    }
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val rotation = ((frameState.rotationDegrees % 360) + 360) % 360
+        val sourceWidth = if (rotation % 180 == 0) frameState.sourceWidth else frameState.sourceHeight
+        val sourceHeight = if (rotation % 180 == 0) frameState.sourceHeight else frameState.sourceWidth
+        val scale = maxOf(size.width / sourceWidth, size.height / sourceHeight)
+        val renderedWidth = sourceWidth * scale
+        val renderedHeight = sourceHeight * scale
+        val offsetX = (size.width - renderedWidth) / 2f
+        val offsetY = (size.height - renderedHeight) / 2f
+        val strokeWidth = 3.dp.toPx()
+
+        fun project(point: VisionPoint): Offset {
+            val rotated = point.rotate(rotation)
+            return Offset(
+                offsetX + rotated.x * renderedWidth,
+                offsetY + rotated.y * renderedHeight
+            )
+        }
+
+        frameState.subjects.forEach { subject ->
+            val boxCorners = listOf(
+                VisionPoint(subject.x, subject.y),
+                VisionPoint(subject.x + subject.width, subject.y),
+                VisionPoint(subject.x + subject.width, subject.y + subject.height),
+                VisionPoint(subject.x, subject.y + subject.height)
+            ).map(::project)
+            val left = boxCorners.minOf { it.x }
+            val top = boxCorners.minOf { it.y }
+            val right = boxCorners.maxOf { it.x }
+            val bottom = boxCorners.maxOf { it.y }
+            val color = CyanAccent
+            val contour = subject.contour.map(::project)
+
+            if (contour.size >= 3) {
+                val path = Path().apply {
+                    moveTo(contour.first().x, contour.first().y)
+                    contour.drop(1).forEach { lineTo(it.x, it.y) }
+                    close()
+                }
+                drawPath(path, color.copy(alpha = 0.14f))
+                drawPath(path, color, style = Stroke(strokeWidth))
+            } else {
+                drawRoundRect(
+                    color = color.copy(alpha = 0.14f),
+                    topLeft = Offset(left, top),
+                    size = Size(right - left, bottom - top),
+                    cornerRadius = CornerRadius(12.dp.toPx())
+                )
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(left, top),
+                    size = Size(right - left, bottom - top),
+                    cornerRadius = CornerRadius(12.dp.toPx()),
+                    style = Stroke(strokeWidth)
+                )
+            }
+
+            drawIntoCanvas { canvas ->
+                labelPaint.color = color.toArgb()
+                labelPaint.textSize = 14.dp.toPx()
+                canvas.nativeCanvas.drawText(
+                    "SUBJECT #${subject.id}",
+                    left + strokeWidth,
+                    (top - strokeWidth).coerceAtLeast(labelPaint.textSize),
+                    labelPaint
+                )
+            }
+        }
+    }
+}
+
+private fun VisionPoint.rotate(rotationDegrees: Int): VisionPoint = when (rotationDegrees) {
+    90 -> VisionPoint(1f - y, x)
+    180 -> VisionPoint(1f - x, 1f - y)
+    270 -> VisionPoint(y, 1f - x)
+    else -> this
 }
 
 @Composable

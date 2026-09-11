@@ -3,7 +3,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Defines the evidence required before claiming a slice or release works.  
-**Current stage:** Server protocol and vision-adapter tests pass locally. The physical walking-person server test and Android overlay acceptance are pending.
+**Current stage:** Server protocol and vision-adapter tests pass locally; the Android overlay baseline compiles and is installed. Physical walking-person and alignment acceptance are pending.
 **Update this file when:** a requirement changes, a defect reveals a missing case, a test fixture is added, or release evidence is measured. Do not mark a case passed without executable or manual-test evidence.
 
 ## 1. Test Principles
@@ -51,6 +51,7 @@ Network prerequisite: run the transport test on a direct private hotspot as well
 | Android installation | Passed | Debug APK installs on the authorized phone. |
 | Latest-frame transport | Passed for private hotspot | Phone camera opens and reaches the PC over the Windows hotspot; malformed full-resolution frames are prevented by client-side downsampling. |
 | Vision | Metadata loop passed; person-track acceptance pending | Phone received `LINK: OK`, `FRAME: 17`, and a 315 ms round trip from the YOLO server. Walk one person in view and record stable ID, normalized box/contour, and inference time. |
+| Overlay | Baseline built and installed; manual acceptance pending | Phone parses frame-state subjects and draws a rotation/crop-aware Canvas overlay. Verify a person box follows the preview in portrait, then rotate to landscape and check again. |
 
 ## 4. Performance Measurement
 

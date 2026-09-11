@@ -6,7 +6,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Defines the intended technical shape so implementation choices remain compatible end to end.  
-**Current stage:** Step 4 vision adapter and phone-to-server metadata loop are physically validated. Physical walking-person validation and the Android overlay are not complete. The PyTorch `yolo26n-seg.pt` baseline is selected; TensorRT remains deferred pending measurement.
+**Current stage:** Step 5 Android overlay baseline is implemented and installed. Physical walking-person alignment validation, selection, and aura interactions are not complete. The PyTorch `yolo26n-seg.pt` baseline is selected; TensorRT remains deferred pending measurement.
 **Update this file when:** the actual architecture, owned state, dependencies, deployment shape, configuration, or failure behavior differs from this design. Record measured facts, not guesses.
 
 ## 1. Architecture
@@ -81,6 +81,7 @@ Start with `yolo26n-seg.pt`: the nano instance-segmentation checkpoint is the fa
 - `gradle :app:assembleDebug` has now passed on the development machine.
 - The debug APK has been installed and the camera preview works over a private Windows hotspot; the college captive-portal network is not a supported transport network.
 - The physical phone now receives `frame_state` acknowledgements from the YOLO server over the hotspot. One observed round trip was 315 ms; this is a smoke-test observation, not a p50/p95 performance result.
+- Android now parses `frame_state.subjects` and projects normalized boxes/contours through source rotation and `FILL_CENTER` crop into a Canvas overlay. It renders a temporary `SUBJECT #id` label; physical alignment is still unmeasured.
 
 ## 5. Data Boundaries
 

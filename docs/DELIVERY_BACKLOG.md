@@ -3,7 +3,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Tells the AI the next permitted implementation step and the evidence that closes it.  
-**Current stage:** Build Guide Step 4 server vision and live metadata response loop are implemented and validated. A live walking-person acceptance run and all Android overlay/aura slices remain.
+**Current stage:** Build Guide Step 5 overlay baseline is implemented and installed. Physical alignment, selection, and all aura slices remain.
 **Update this file when:** starting a slice, completing its definition of done, splitting a proven-too-large slice, or adding a user-approved scope item. Preserve completed slices as history.
 
 Build each slice to its acceptance condition before starting the next one. This is an ordered backlog, not a promise of calendar dates.
@@ -13,7 +13,7 @@ Build each slice to its acceptance condition before starting the next one. This 
 | 0. Environment | Phone and PC can talk on the private LAN. | NFR-06 | Source exists; manually verify health endpoint opens from phone and Android shell installs. |
 | 1. Transport | Latest JPEG/ack loop with frame ordering. | FR-02, FR-03 | Debug APK installs and camera reaches the PC over the private hotspot; frame IDs and latency are visible while vision runs. |
 | 2. Vision | PC returns up to six person track boxes and simplified contours. | FR-04, FR-11 | Automated decode/filter/normalization tests pass; phone receives live frame states; walking subject gets a temporary ID; malformed input recovers. |
-| 3. Overlay | Phone draws aligned labels/boxes and status. | FR-01, FR-02 | Portrait/landscape coordinate mapping and stale state work. |
+| 3. Overlay | Phone draws aligned labels/boxes and status. | FR-01, FR-02 | Source rotation and center-crop mapping are implemented; validate a walking person in portrait and landscape and add stale-state handling if needed. |
 | 4. Selection | One tapped subject is active. | FR-06, FR-07 | Hit-test picks intended subject and clears expiry. |
 | 5. Aura core | Stable profiles and live random walk. | FR-05, FR-07 | Profile stays stable per live track; value stays in band. |
 | 6. Scan | Double-tap creates a safe result card. | FR-08, FR-09 | Finite, milestone, and both infinity paths pass. |

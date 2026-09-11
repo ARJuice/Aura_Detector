@@ -1,7 +1,7 @@
 # AUR/S — TinkerHub Documentation Source
 
 **Audience:** AI agents and implementers; this is source material for the future public project website and submission page.  
-**Current stage:** Stage 0 — its project description is ready, but the website, implementation, screenshots, demo video, team details, and run instructions do not exist yet.  
+**Current stage:** Public-artifact Stage 0 — the website, screenshots, demo video, team details, and polished run instructions do not exist yet. The local Android/PC prototype now has a working transport, vision metadata loop, and baseline subject overlay.
 **Purpose:** Preserves the TinkerHub-facing narrative and tracks the public artifacts that must be added after implementation.  
 **Update this file when:** a public artifact exists, the project behavior changes, or submission information becomes known. Do not replace `TBD` with guesses.
 
