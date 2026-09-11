@@ -3,7 +3,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Defines the evidence required before claiming a slice or release works.  
-**Current stage:** Server protocol and vision-adapter tests pass locally; the Android overlay, selection, and aura-core slices compile and install, and selection has passed a physical portrait tap check. Live-value, landscape, and scan acceptance remain.
+**Current stage:** Server protocol and vision-adapter tests pass locally; the Android overlay, selection, aura-core, and scan slices compile. Selection has passed a physical portrait tap check; the device is currently disconnected, so live-value, scan, landscape, and feedback acceptance remain.
 **Update this file when:** a requirement changes, a defect reveals a missing case, a test fixture is added, or release evidence is measured. Do not mark a case passed without executable or manual-test evidence.
 
 ## 1. Test Principles
@@ -54,6 +54,7 @@ Network prerequisite: run the transport test on a direct private hotspot as well
 | Overlay | Baseline built and installed; manual acceptance pending | Phone binds preview and analysis to one CameraX viewport, transmits the matching cropped/upright image, and uses a source-to-preview transform with that same rotation for the Canvas overlay. Verify a person box follows the preview in portrait, then rotate to landscape and check again. |
 | Selection | Implemented; portrait tap check passed | The phone selected `#565` from a tap at `(500, 900)` and displayed `SELECTED: #565`; verify switching subjects and expiry cleanup during a walking-person run. |
 | Aura core | Implemented; physical live-value check pending | Android parses the server profile and generates a local bounded reading for the selected track; point the phone at a person, tap them, and verify the displayed `AUR/s` changes without a new network field per tick. |
+| Scan | Implemented; physical device check pending | Double-tap the selected subject, verify the one-second scanning state, then verify base, modifier, final, classification, and both named infinity paths. |
 
 ## 4. Performance Measurement
 

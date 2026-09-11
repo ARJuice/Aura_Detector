@@ -3,7 +3,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Defines user-visible states and gesture behavior before implementation spreads them across camera, overlay, and HUD code.  
-**Current stage:** Stage 7 — subject tracking, aligned contours, temporary IDs, single-subject tap selection, and the local live-reading loop are implemented; scans and effects remain planned.
+**Current stage:** Stage 8 — subject tracking, aligned contours, temporary IDs, single-subject tap selection, local live readings, and the double-tap scan card are implemented; effects remain planned.
 **Update this file when:** a gesture, state transition, accessibility behavior, label, or error presentation changes in the built app.
 
 ## 1. Screen Structure

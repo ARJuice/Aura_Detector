@@ -117,9 +117,15 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
     var liveReading by remember { mutableStateOf<String?>(null) }
     val latestFrameState = rememberUpdatedState(frameState)
     val auraGenerators = remember { mutableMapOf<Long, AuraValueGenerator>() }
+    var scanningSubjectId by remember { mutableStateOf<Long?>(null) }
+    var scanProgress by remember { mutableStateOf(0f) }
+    var scanResult by remember { mutableStateOf<AuraScanResult?>(null) }
+    val scanGenerators = remember { mutableMapOf<Long, AuraScanGenerator>() }
     LaunchedEffect(frameState) {
         if (selectedSubjectId != null && frameState?.subjects?.none { it.id == selectedSubjectId } != false) {
             selectedSubjectId = null
+            scanningSubjectId = null
+            scanResult = null
         }
     }
     LaunchedEffect(selectedSubjectId) {
@@ -143,6 +149,29 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
             liveReading = null
         }
     }
+    LaunchedEffect(scanningSubjectId) {
+        val subjectId = scanningSubjectId ?: run {
+            scanProgress = 0f
+            return@LaunchedEffect
+        }
+        scanResult = null
+        val startedAt = System.currentTimeMillis()
+        try {
+            while (isActive) {
+                scanProgress = ((System.currentTimeMillis() - startedAt) / 1_000f).coerceIn(0f, 1f)
+                if (scanProgress >= 1f) break
+                delay(80)
+            }
+            scanResult = scanGenerators.getOrPut(subjectId) { AuraScanGenerator(subjectId) }.next()
+            delay(4_500)
+        } finally {
+            if (scanningSubjectId == subjectId) {
+                scanningSubjectId = null
+                scanProgress = 0f
+                scanResult = null
+            }
+        }
+    }
     DisposableEffect(transport) {
         transport.connect()
         onDispose { transport.close() }
@@ -154,7 +183,23 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
             frameState = frameState,
             selectedSubjectId = selectedSubjectId,
             liveReading = liveReading,
-            onSelectSubject = { selectedSubjectId = it }
+            onSelectSubject = {
+                if (selectedSubjectId != it) {
+                    scanningSubjectId = null
+                    scanResult = null
+                }
+                selectedSubjectId = it
+            },
+            onScanSubject = { subjectId ->
+                if (selectedSubjectId == subjectId && scanningSubjectId == null) {
+                    scanningSubjectId = subjectId
+                }
+            }
+        )
+        ScanOverlay(
+            subjectId = scanningSubjectId,
+            progress = scanProgress,
+            result = scanResult
         )
         ScannerHud(
             status = status,
@@ -266,13 +311,16 @@ private fun SubjectOverlay(
     frameState: VisionFrameState?,
     selectedSubjectId: Long?,
     liveReading: String?,
-    onSelectSubject: (Long?) -> Unit
+    onSelectSubject: (Long?) -> Unit,
+    onScanSubject: (Long) -> Unit
 ) {
     val projectedSubjects = remember(frameState) {
         frameState?.let(::projectSubjects).orEmpty()
     }
     val latestSubjects = rememberUpdatedState(projectedSubjects)
     val latestSelectionHandler = rememberUpdatedState(onSelectSubject)
+    val latestScanHandler = rememberUpdatedState(onScanSubject)
+    val latestSelectedSubjectId = rememberUpdatedState(selectedSubjectId)
     if (projectedSubjects.isEmpty()) return
 
     val labelPaint = remember {
@@ -285,12 +333,24 @@ private fun SubjectOverlay(
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
-                detectTapGestures { point ->
-                    val hit = latestSubjects.value
-                        .asReversed()
-                        .firstOrNull { it.contains(point) }
-                    latestSelectionHandler.value(hit?.subject?.id)
-                }
+                detectTapGestures(
+                    onDoubleTap = { point ->
+                        val hit = findHitSubject(latestSubjects.value, point)
+                        if (hit == null) {
+                            latestSelectionHandler.value(null)
+                        } else if (hit.subject.id == latestSelectedSubjectId.value) {
+                            latestScanHandler.value(hit.subject.id)
+                        } else {
+                            latestSelectionHandler.value(hit.subject.id)
+                        }
+                    },
+                    onTap = { point ->
+                        findHitSubject(latestSubjects.value, point)
+                            ?.subject
+                            ?.id
+                            .let(latestSelectionHandler.value)
+                    }
+                )
             }
     ) {
         val strokeWidth = 3.dp.toPx()
@@ -360,6 +420,9 @@ private fun SubjectOverlay(
     }
 }
 
+private fun findHitSubject(subjects: List<ProjectedSubject>, point: Offset): ProjectedSubject? =
+    subjects.asReversed().firstOrNull { it.contains(point) }
+
 private data class ProjectedSubject(
     val subject: com.auradetector.transport.VisionSubject,
     val box: ComposeRect,
@@ -414,6 +477,94 @@ private fun pointInPolygon(point: Offset, polygon: List<Offset>): Boolean {
         previous = index
     }
     return inside
+}
+
+private data class AuraScanResult(
+    val base: String,
+    val modifier: String,
+    val final: String,
+    val classification: String
+)
+
+private class AuraScanGenerator(subjectId: Long) {
+    private val random = Random(subjectId.toInt() xor 0x51A7C0DE)
+
+    fun next(): AuraScanResult {
+        val roll = random.nextDouble()
+        if (roll < 0.015) {
+            return AuraScanResult(
+                base = "+∞",
+                modifier = "CURSE −1,000 AUR",
+                final = "+∞",
+                classification = "AURA OVERFLOW"
+            )
+        }
+        if (roll < 0.03) {
+            return AuraScanResult(
+                base = "−∞",
+                modifier = "BLESSING +184 AUR",
+                final = "−∞",
+                classification = "NEGATIVE AURA SINGULARITY"
+            )
+        }
+
+        val baseMagnitude = when {
+            roll < 0.58 -> random.nextLong(1, 1_001)
+            roll < 0.88 -> random.nextLong(5_000, 100_001)
+            roll < 0.99 -> random.nextLong(100_000, 1_000_001)
+            else -> 67_696_969L
+        }
+        val base = if (random.nextBoolean()) baseMagnitude else -baseMagnitude
+        val modifierMagnitude = random.nextLong(100, 2_001)
+        val modifier = if (random.nextBoolean()) modifierMagnitude else -modifierMagnitude
+        val final = base + modifier
+        val classification = when {
+            kotlin.math.abs(final) >= 1_000_000 -> "EXTREME FIELD"
+            baseMagnitude == 67_696_969L -> "MILESTONE SIGNAL"
+            final >= 0 -> "RADIANT"
+            else -> "VOID-ADJACENT"
+        }
+        return AuraScanResult(
+            base = signed(base),
+            modifier = "${if (modifier >= 0) "BLESSING" else "CURSE"} ${signed(modifier)} AUR",
+            final = signed(final),
+            classification = classification
+        )
+    }
+
+    private fun signed(value: Long): String =
+        "${if (value >= 0) "+" else "−"}${NumberFormat.getIntegerInstance(Locale.US).format(kotlin.math.abs(value))}"
+}
+
+@Composable
+private fun ScanOverlay(subjectId: Long?, progress: Float, result: AuraScanResult?) {
+    if (subjectId == null) return
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(24.dp)
+                .background(DarkNavy.copy(alpha = 0.94f))
+                .border(2.dp, if (result == null) OrangeWarning else NeonGreen)
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (result == null) {
+                Text("SCANNING SUBJECT #$subjectId", color = OrangeWarning)
+                Text("CALIBRATING ${(progress * 100).toInt()}%", color = CyanAccent)
+                Text("NEGOTIATING WITH THE FIELD", color = CyanAccent)
+            } else {
+                Text("AURA SCAN COMPLETE", color = NeonGreen)
+                Text("BASE: ${result.base}", color = CyanAccent)
+                Text(result.modifier, color = CyanAccent)
+                Text("FINAL: ${result.final}", color = NeonGreen)
+                Text(result.classification, color = OrangeWarning)
+            }
+        }
+    }
 }
 
 private class AuraValueGenerator(subjectId: Long) {

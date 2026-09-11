@@ -1,7 +1,7 @@
 # Aura Detector — Internal Build Guide
 
 **Audience:** AI agents and implementers.  
-**Current stage:** Step 7 — the Android subject-overlay baseline, tap selection, and local aura-core implementation are installed; physical live-value acceptance and scans are next.
+**Current stage:** Step 8 — the Android subject-overlay baseline, tap selection, local aura-core, and local scan implementations compile; physical live-value/scan acceptance and feedback are next.
 **Purpose:** Turns the product/technical documents into the safest next execution order.  
 **Update this file when:** a phase starts or finishes, an actual command/setup differs, a benchmark changes the recommended model/configuration, or a discovered constraint changes the build order. Do not claim a phase is complete without its stated definition-of-done evidence.
 
@@ -190,7 +190,8 @@ Use log-space movement for broad ranges and clamp every finite result to its ban
 
 - `AuraWebSocket` parses the server's stable `band`, `min`, `max`, and `palette` profile fields without adding per-reading network traffic.
 - `ScannerScreen` owns one bounded `AuraValueGenerator` per selected track, updates the selected value locally every 160 ms, clamps finite bands, and treats `∞` as a named display state.
-- The APK compiles and installs; a physical person must still be selected to verify the live value on-device.
+- `ScannerScreen` handles selected-subject double-taps with a one-second local scan, deterministic finite/infinity result generator, and a result card containing base, modifier, final, and classification.
+- The APK compiles; the authorized phone is currently disconnected, so live-value and scan behavior still need on-device verification.
 
 ### Definition of done
 
