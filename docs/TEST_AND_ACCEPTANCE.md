@@ -3,7 +3,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Defines the evidence required before claiming a slice or release works.  
-**Current stage:** Server protocol and vision-adapter tests pass locally; the Android overlay, selection, aura-core, scan, and feedback slices compile. The authorized phone is connected and held `LINK: OK` through frame 130 after the CameraX transform guard; scan, landscape, and full audio/haptic acceptance remain.
+**Current stage:** Server protocol and vision-adapter tests pass locally; the Android overlay, selection, aura-core, scan, feedback, and Stage 9 transport/payload/input safeguards compile. The authorized phone is connected and held `LINK: OK` through frame 130 after the CameraX transform guard; scan, landscape, full audio/haptic, and hosted-server measurement acceptance remain.
 **Update this file when:** a requirement changes, a defect reveals a missing case, a test fixture is added, or release evidence is measured. Do not mark a case passed without executable or manual-test evidence.
 
 ## 1. Test Principles
@@ -56,6 +56,7 @@ Network prerequisite: run the transport test on a direct private hotspot as well
 | Aura core | Implemented; initial phone observation passed | Android displayed `SELECTED: #156  565 AUR/s` on the authorized phone while receiving frame 50. Verify movement stays within its band and cover the named-infinity path. |
 | Scan | Implemented; physical device check pending | Double-tap the selected subject, verify the centered one-second scanning card/progress bar, then verify base, modifier, final, classification, and both named infinity paths. |
 | Feedback | Implemented; control check passed | The scanner exposed `SOUND ON`; tapping it changed the visible control to `SOUND OFF` while `LINK: OK` continued through frame 130. Verify real scan tone, haptic, pulse readability, and mute behavior on the target phone. |
+| Stage 9 transport/payload/input | Build and unit verified | The Android sender keeps one in-flight frame, expires it after 1.5 seconds, caps uploads at 320 KB, and parses no more than 48 contour points. Server validation enforces the same 320-KB/640-edge contract, decodes once, and uses a bounded 512-pixel default model input. Verify p95 on the deployed host. |
 
 ## 4. Performance Measurement
 

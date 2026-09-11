@@ -24,11 +24,17 @@ def test_frame_valid():
     f = Frame(frameId=1, capturedAtMs=1000, width=640, height=480, jpeg=b64_jpeg)
     assert f.frameId == 1
     assert f.width == 640
+    assert f.jpeg_bytes == b"fake_jpeg_data"
 
 def test_frame_invalid_dimensions():
     b64_jpeg = base64.b64encode(b"fake_jpeg_data").decode()
     with pytest.raises(ValidationError):
         Frame(frameId=1, capturedAtMs=1000, width=2000, height=1080, jpeg=b64_jpeg)
+
+def test_frame_rejects_long_edge_above_upload_contract():
+    b64_jpeg = base64.b64encode(b"fake_jpeg_data").decode()
+    with pytest.raises(ValidationError):
+        Frame(frameId=1, capturedAtMs=1000, width=640, height=641, jpeg=b64_jpeg)
 
 def test_frame_invalid_size():
     big_jpeg = base64.b64encode(b"a" * (2 * 1024 * 1024 + 1)).decode()

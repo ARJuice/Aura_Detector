@@ -1,5 +1,4 @@
 import argparse
-import base64
 import logging
 import secrets
 import time
@@ -106,15 +105,16 @@ async def websocket_endpoint(websocket: WebSocket):
             text = await websocket.receive_text()
             server_received_at = int(time.time() * 1000)
             inference_start = time.time()
+            frame_id: Optional[int] = None
             
             try:
                 frame = Frame.model_validate_json(text)
+                frame_id = frame.frameId
                 if frame.frameId <= last_frame_id:
                     raise ValueError("Frame ID must be strictly increasing")
                 last_frame_id = frame.frameId
                 
-                jpeg_bytes = base64.b64decode(frame.jpeg)
-                subjects = pipeline.process_frame(jpeg_bytes, frame.width, frame.height)
+                subjects = pipeline.process_frame(frame.jpeg_bytes, frame.width, frame.height)
                 
                 # Apply aura profile to subjects
                 for sub in subjects:
@@ -132,25 +132,29 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_text(ErrorMsg(
                     code=INVALID_FRAME,
                     message=str(e),
-                    recoverable=True
+                    recoverable=True,
+                    frameId=frame_id,
                 ).model_dump_json())
             except InvalidFrameError as e:
                 await websocket.send_text(ErrorMsg(
                     code=INVALID_FRAME,
                     message=str(e),
-                    recoverable=True
+                    recoverable=True,
+                    frameId=frame_id,
                 ).model_dump_json())
             except ModelUnavailableError as e:
                 await websocket.send_text(ErrorMsg(
                     code=SERVER_UNAVAILABLE,
                     message=f"Vision model unavailable: {e}",
-                    recoverable=True
+                    recoverable=True,
+                    frameId=frame_id,
                 ).model_dump_json())
             except Exception as e:
                 await websocket.send_text(ErrorMsg(
                     code=INVALID_MESSAGE,
                     message=str(e),
-                    recoverable=True
+                    recoverable=True,
+                    frameId=frame_id,
                 ).model_dump_json())
 
     except WebSocketDisconnect:

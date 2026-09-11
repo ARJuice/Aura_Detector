@@ -1,6 +1,6 @@
 from typing import List, Literal, Optional
 import base64
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, PrivateAttr, field_validator, model_validator
 
 # Constants
 UNAUTHORIZED = "UNAUTHORIZED"
@@ -9,6 +9,8 @@ INVALID_MESSAGE = "INVALID_MESSAGE"
 INVALID_FRAME = "INVALID_FRAME"
 SERVER_UNAVAILABLE = "SERVER_UNAVAILABLE"
 RATE_LIMITED = "RATE_LIMITED"
+MAX_FRAME_LONG_EDGE = 640
+MAX_JPEG_BYTES = 320 * 1024
 
 def validate_version(v: int) -> int:
     if v != 1:
@@ -21,10 +23,12 @@ def validate_token(v: str) -> str:
     return v
 
 def validate_frame_dimensions(width: int, height: int, jpeg_size: int):
-    if width > 1920 or height > 1080:
-        raise ValueError("Dimensions exceed maximum allowed (1920x1080)")
-    if jpeg_size > 2 * 1024 * 1024:
-        raise ValueError("JPEG size exceeds maximum allowed (2MB)")
+    if width < 2 or height < 2:
+        raise ValueError("Dimensions must be at least 2x2")
+    if max(width, height) > MAX_FRAME_LONG_EDGE:
+        raise ValueError(f"Longest frame edge exceeds {MAX_FRAME_LONG_EDGE}px")
+    if jpeg_size > MAX_JPEG_BYTES:
+        raise ValueError("JPEG size exceeds maximum allowed (320KB)")
 
 class Hello(BaseModel):
     type: Literal["hello"] = "hello"
@@ -70,6 +74,7 @@ class Frame(BaseModel):
     width: int
     height: int
     jpeg: str
+    _jpeg_bytes: bytes = PrivateAttr(default=b"")
 
     @field_validator("version")
     @classmethod
@@ -81,9 +86,14 @@ class Frame(BaseModel):
         try:
             jpeg_bytes = base64.b64decode(self.jpeg, validate=True)
             validate_frame_dimensions(self.width, self.height, len(jpeg_bytes))
+            self._jpeg_bytes = jpeg_bytes
         except Exception as e:
             raise ValueError(f"Invalid frame: {str(e)}")
         return self
+
+    @property
+    def jpeg_bytes(self) -> bytes:
+        return self._jpeg_bytes
 
 class FrameState(BaseModel):
     type: Literal["frame_state"] = "frame_state"
@@ -99,3 +109,4 @@ class ErrorMsg(BaseModel):
     code: str
     message: str
     recoverable: bool
+    frameId: Optional[int] = None

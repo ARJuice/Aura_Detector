@@ -57,6 +57,7 @@ data class VisionFrameState(
 
 private data class SentFrame(
     val id: Long,
+    val sentAtMs: Long,
     val sourceWidth: Int,
     val sourceHeight: Int,
     val sourceToPreview: FloatArray
@@ -69,6 +70,8 @@ private data class SentFrame(
 class AuraWebSocket(private val config: ServerConfig) : Closeable {
     private companion object {
         const val MIN_FRAME_INTERVAL_MS = 67L // 15 FPS maximum for the LAN prototype.
+        const val MAX_IN_FLIGHT_FRAME_MS = 1_500L
+        const val MAX_UPLOAD_JPEG_BYTES = 320 * 1024
     }
     private val client = OkHttpClient.Builder()
         .connectTimeout(3, TimeUnit.SECONDS)
@@ -78,7 +81,6 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
     private val lastAcceptedFrameId = AtomicLong(-1)
     private val awaitingFrameState = AtomicBoolean(false)
     private val helloAcknowledged = AtomicBoolean(false)
-    private val frameSentAtMs = AtomicLong(0)
     private val lastFrameSentAtMs = AtomicLong(0)
     private val inFlightFrame = AtomicReference<SentFrame?>(null)
     private var webSocket: WebSocket? = null
@@ -135,10 +137,14 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
     ): Boolean {
         val now = SystemClock.elapsedRealtime()
         if (!helloAcknowledged.get() || now - lastFrameSentAtMs.get() < MIN_FRAME_INTERVAL_MS) return false
+        if (jpeg.size > MAX_UPLOAD_JPEG_BYTES) {
+            _status.value = TransportStatus(VisionLinkState.DEGRADED, "Frame payload too large")
+            return false
+        }
+        expireStalledFrame(now)
         if (!awaitingFrameState.compareAndSet(false, true)) return false
 
         val id = frameId.incrementAndGet()
-        frameSentAtMs.set(now)
         lastFrameSentAtMs.set(now)
         val message = JSONObject()
             .put("type", "frame")
@@ -151,7 +157,7 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
 
         val socket = webSocket
         inFlightFrame.set(
-            SentFrame(id, sourceWidth, sourceHeight, sourceToPreview.copyOf())
+            SentFrame(id, now, sourceWidth, sourceHeight, sourceToPreview.copyOf())
         )
         if (socket == null || !socket.send(message.toString())) {
             inFlightFrame.set(null)
@@ -174,28 +180,33 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
             }
             "frame_state" -> {
                 val id = message.optLong("frameId", -1)
-                if (id > lastAcceptedFrameId.get()) {
-                    lastAcceptedFrameId.set(id)
-                    awaitingFrameState.set(false)
-                    val sentFrame = inFlightFrame.getAndSet(null)
-                    if (sentFrame?.id == id) {
-                        _frameState.value = VisionFrameState(
-                            frameId = id,
-                            sourceWidth = sentFrame.sourceWidth,
-                            sourceHeight = sentFrame.sourceHeight,
-                            sourceToPreview = sentFrame.sourceToPreview,
-                            subjects = parseSubjects(message.optJSONArray("subjects"))
-                        )
-                    }
-                    _status.value = TransportStatus(
-                        state = VisionLinkState.READY,
-                        detail = "LINK: OK",
-                        lastFrameId = id,
-                        latencyMs = SystemClock.elapsedRealtime() - frameSentAtMs.get()
-                    )
-                }
+                val sentFrame = inFlightFrame.get()
+                // A late response for an expired frame must never release the gate for a newer frame.
+                if (sentFrame == null || sentFrame.id != id || id <= lastAcceptedFrameId.get()) return
+                if (!inFlightFrame.compareAndSet(sentFrame, null)) return
+
+                lastAcceptedFrameId.set(id)
+                awaitingFrameState.set(false)
+                _frameState.value = VisionFrameState(
+                    frameId = id,
+                    sourceWidth = sentFrame.sourceWidth,
+                    sourceHeight = sentFrame.sourceHeight,
+                    sourceToPreview = sentFrame.sourceToPreview,
+                    subjects = parseSubjects(message.optJSONArray("subjects"))
+                )
+                _status.value = TransportStatus(
+                    state = VisionLinkState.READY,
+                    detail = "LINK: OK",
+                    lastFrameId = id,
+                    latencyMs = SystemClock.elapsedRealtime() - sentFrame.sentAtMs
+                )
             }
             "error" -> {
+                val responseFrameId = message.optLong("frameId", -1)
+                if (responseFrameId >= 0) {
+                    val sentFrame = inFlightFrame.get()
+                    if (sentFrame == null || sentFrame.id != responseFrameId) return
+                }
                 awaitingFrameState.set(false)
                 inFlightFrame.set(null)
                 _frameState.value = null
@@ -219,6 +230,15 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
         webSocket = null
         try { client.dispatcher.executorService.shutdown() } catch (_: Exception) {}
         try { client.connectionPool.evictAll() } catch (_: Exception) {}
+    }
+
+    private fun expireStalledFrame(now: Long) {
+        val stalled = inFlightFrame.get() ?: return
+        if (now - stalled.sentAtMs < MAX_IN_FLIGHT_FRAME_MS) return
+        if (inFlightFrame.compareAndSet(stalled, null)) {
+            awaitingFrameState.set(false)
+            _status.value = TransportStatus(VisionLinkState.DEGRADED, "Skipping stale frame")
+        }
     }
 
     private fun parseSubjects(subjects: org.json.JSONArray?): List<VisionSubject> {
@@ -249,7 +269,7 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
     }
 
     private fun parseContour(points: org.json.JSONArray): List<VisionPoint> = buildList {
-        for (index in 0 until minOf(points.length(), 96)) {
+        for (index in 0 until minOf(points.length(), 48)) {
             val point = points.optJSONArray(index) ?: continue
             if (point.length() < 2) continue
             val x = point.optDouble(0, Double.NaN).toFloat()

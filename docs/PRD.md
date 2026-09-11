@@ -7,7 +7,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Defines what must be built and what must remain out of scope.  
-**Current stage:** Stage 8 — transport, server-side person segmentation, aligned Android overlays, tap selection, local aura-core/scan logic, and feedback have implementation evidence; physical scan/audio/haptic acceptance and performance measurement remain.
+**Current stage:** Stage 9 — the current-frame transport, bounded payload/metadata, and default model-input safeguards join the implemented overlay, scan, and feedback features; physical scan/audio/haptic and hosted-server measurement remain.
 **Update this file when:** the user changes user-facing behavior, priorities, scope, success criteria, or a requirement's acceptance meaning. Do not update it merely because code structure changes.
 
 ## 1. Product Summary
@@ -64,7 +64,7 @@ Vision locates people only. Aura results are generated entertainment, never a me
 | ID | Requirement |
 |---|---|
 | NFR-01 | Median capture-to-overlay latency is under 120 ms on the target network; p95 is under 220 ms. |
-| NFR-02 | p95 inference plus tracking is under 50 ms on the target RTX 4060 profile. |
+| NFR-02 | p95 inference plus tracking is under 50 ms on the deployed hosted-server configuration. |
 | NFR-03 | The app remains usable with six active subjects. |
 | NFR-04 | The phone renders its own camera preview even when the server is unavailable. |
 | NFR-05 | Stale server data is visibly marked degraded and is not presented as live. |
@@ -87,4 +87,4 @@ The MVP succeeds when a new user can connect, scan a visible person, understand 
 
 **In MVP:** local connection, person detection/tracking, IDs, boxes/contours, seeded profiles, selection, live reading, finite/infinite scans, core effects, reconnect status, and metrics.
 
-**After MVP:** interference, ReID tuning, high-fidelity contour effects, TensorRT tuning after baseline measurement, share cards, and alternate unit labels.
+**After MVP:** interference, ReID tuning, high-fidelity contour effects, host-specific runtime tuning after baseline measurement, share cards, and alternate unit labels.

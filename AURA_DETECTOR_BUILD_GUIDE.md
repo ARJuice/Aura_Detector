@@ -1,7 +1,7 @@
 # Aura Detector — Internal Build Guide
 
 **Audience:** AI agents and implementers.  
-**Current stage:** Step 8 — the Android subject-overlay baseline, tap selection, local aura-core, local scan, and feedback implementations compile and install. Physical scan/audio/haptic acceptance and performance measurement remain.
+**Current stage:** Step 9 — stale-frame, payload, and model-input safeguards are implemented and test-verified. Physical scan/audio/haptic, landscape, and measured hosted-server acceptance remain.
 **Purpose:** Turns the product/technical documents into the safest next execution order.  
 **Update this file when:** a phase starts or finishes, an actual command/setup differs, a benchmark changes the recommended model/configuration, or a discovered constraint changes the build order. Do not claim a phase is complete without its stated definition-of-done evidence.
 
@@ -22,8 +22,8 @@ Keep these out of the MVP: face recognition, pose, custom training, WebRTC, clou
 
 ### PC (inference server)
 
-- Use the RTX 4060 machine as the only live inference server.
-- Install a supported NVIDIA driver, Python 3.11, and a CUDA-enabled PyTorch build.
+- Use the intended hosted vision server as the only live inference server.
+- Install Python 3.11 and the PyTorch build supported by that host.
 - Create a Python virtual environment in `server/.venv`; keep dependencies in `server/requirements.txt`.
 - Connect the PC and Android device to the same dedicated 5 GHz / Wi-Fi 6 network if possible. Disable VPNs during testing.
 - Do not use captive-portal or client-isolated college/public Wi-Fi for the live link. Use a direct phone/PC hotspot so the phone can reach the PC without a login redirect.
@@ -126,9 +126,9 @@ Return normalized coordinates so each phone layout can scale them correctly:
 ### Current implementation evidence
 
 - `server/pipeline.py` loads the checkpoint once, warms it once, decodes incoming JPEGs with OpenCV, filters to class `person`, runs BoT-SORT, caps output at six subjects, and emits normalized boxes plus simplified contours.
-- `ScannerScreen.kt` downscales every camera payload to a maximum 640-pixel long edge before JPEG encoding; a high-resolution camera frame therefore cannot violate the protocol's 1920×1080 input limit.
+- `ScannerScreen.kt` downscales every camera payload to a maximum 576-pixel long edge, recompresses it below 320 KB before Base64 encoding, and the server rejects anything exceeding the 640-pixel/320-KB transport contract.
 - `server/tests/test_pipeline.py` verifies person filtering, confidence ranking, subject cap, normalized coordinates, contour bounds, fallback IDs, and malformed JPEG handling.
-- Device selection is automatic: CUDA device 0 when available, otherwise CPU. The development environment currently reports CPU-only PyTorch, so the RTX 4060 performance gate is still open.
+- The server defaults to a 512-pixel YOLO input and accepts `AURA_IMAGE_SIZE` only within the 320–640 range; host-specific acceleration work is intentionally out of scope.
 - The private-hotspot smoke test has received live `frame_state` acknowledgements before and after the shared-viewport/crop/rotation fix (`FRAME: 17`, 315 ms; final check: `FRAME: 27`, 350 ms). These are smoke-test observations, not person-track or p95 performance acceptance results.
 
 ### Definition of done still pending
@@ -251,10 +251,8 @@ Fix bottlenecks in this order:
 1. stale-frame queues;
 2. overly large JPEG frames or metadata;
 3. slow model/input size;
-4. expensive contour/effect drawing;
-5. TensorRT export and FP16 engine on the actual RTX 4060.
 
-Only export TensorRT after the PyTorch path is correct and measured. Use a fixed 640×640 FP16 engine, batch size 1, then warm it at startup. Keep the known-good PyTorch/nano checkpoint as fallback. Test the TensorRT engine on the same GPU, driver, and TensorRT environment used for the demo.
+Stage 9 is deliberately limited to these three transport/input safeguards. Hardware-specific acceleration and effect-drawing changes are out of scope unless explicitly requested.
 
 Targets:
 
@@ -293,7 +291,7 @@ Run these tests on the actual phone, PC, and venue-like network:
 - no-person scene and one partially visible person;
 - rapid taps and double taps;
 - every scan result class, including both infinities;
-- CPU/GPU warm start and cold start;
+- hosted-server warm start and cold start;
 - 15–30 continuous minutes for memory, heat, and socket stability.
 
 Create a short scripted demo: start server, connect phone, scan three people, intentionally reveal a milestone/infinity seed if needed, then reconnect once. Keep a screen recording or mocked playback route only as a rehearsal fallback, not as the public runtime path.
@@ -320,7 +318,7 @@ Create a short scripted demo: start server, connect phone, scan three people, in
 | `seeded-aura-profiles` | stable band, palette, live reading |
 | `local-aura-scan` | double-tap result card and special states |
 | `effects-audio-haptics` | readable polished feedback |
-| `tensorrt-performance-pass` | measured target on the event PC |
+| `transport-payload-input-pass` | stale-frame, payload, and bounded-input safeguards |
 | `interference-post-mvp` | optional cooldown-safe interaction |
 
 ## Final Completion Gate
