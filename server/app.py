@@ -12,9 +12,10 @@ import uvicorn
 
 from .protocol import (
     Hello, HelloAck, Frame, FrameState, ErrorMsg,
-    UNAUTHORIZED, UNSUPPORTED_VERSION, INVALID_MESSAGE, INVALID_FRAME
+    UNAUTHORIZED, UNSUPPORTED_VERSION, INVALID_MESSAGE, INVALID_FRAME,
+    SERVER_UNAVAILABLE,
 )
-from .pipeline import VisionPipeline
+from .pipeline import InvalidFrameError, ModelUnavailableError, VisionPipeline
 from .aura import AuraEngine
 
 logging.basicConfig(level=logging.INFO)
@@ -27,8 +28,13 @@ aura_engine = AuraEngine()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Server starting. Session token: {SESSION_TOKEN}")
-    pipeline.load_model()
-    pipeline.warmup()
+    try:
+        pipeline.load_model()
+        pipeline.warmup()
+    except Exception:
+        # Keep /health and the transport endpoint available so the client can
+        # show a useful failure instead of getting a connection-refused error.
+        logger.exception("Vision model is unavailable; server will stay online")
     yield
     logger.info("Server shutting down.")
 
@@ -126,6 +132,18 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_text(ErrorMsg(
                     code=INVALID_FRAME,
                     message=str(e),
+                    recoverable=True
+                ).model_dump_json())
+            except InvalidFrameError as e:
+                await websocket.send_text(ErrorMsg(
+                    code=INVALID_FRAME,
+                    message=str(e),
+                    recoverable=True
+                ).model_dump_json())
+            except ModelUnavailableError as e:
+                await websocket.send_text(ErrorMsg(
+                    code=SERVER_UNAVAILABLE,
+                    message=f"Vision model unavailable: {e}",
                     recoverable=True
                 ).model_dump_json())
             except Exception as e:

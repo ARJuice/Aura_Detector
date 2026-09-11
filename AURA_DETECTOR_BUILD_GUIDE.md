@@ -1,7 +1,7 @@
 # Aura Detector — Internal Build Guide
 
 **Audience:** AI agents and implementers.  
-**Current stage:** Step 3 — transport implementation is installed and camera-validated over a private Windows hotspot.
+**Current stage:** Step 4 — the server vision adapter is implemented and tested; live walking-person acceptance and the Android overlay are next.
 **Purpose:** Turns the product/technical documents into the safest next execution order.  
 **Update this file when:** a phase starts or finishes, an actual command/setup differs, a benchmark changes the recommended model/configuration, or a discovered constraint changes the build order. Do not claim a phase is complete without its stated definition-of-done evidence.
 
@@ -100,12 +100,12 @@ Start at 640×360 JPEG, quality around 70, and cap transmission at 12–15 FPS. 
 
 ## 4. Add Person Detection, Then Tracking
 
-Start with the smallest supported YOLO instance-segmentation checkpoint available in the installed Ultralytics version (for example, the nano segmentation model). Detect only COCO class `person`.
+Start with `yolo26n-seg.pt`, the nano instance-segmentation checkpoint. Detect only COCO class `person`.
 
 1. Load the model once when the server starts; never load it per frame.
 2. Run one warm-up inference before accepting the first client frame.
 3. Run detection on the newest decoded image.
-4. Enable BoT-SORT tracking with ReID disabled.
+4. Enable BoT-SORT tracking with ReID disabled (`tracker="botsort.yaml"`).
 5. Confirm a new track only after 3 consecutive detections.
 6. Retain a lost track for about one second, then remove it.
 7. Rank tracks by confidence × visible area and return no more than six; keep the selected ID when it remains visible.
@@ -123,9 +123,15 @@ Return normalized coordinates so each phone layout can scale them correctly:
 
 `box` is `[x, y, width, height]`, with all values in `0..1`. Simplify the segmentation contour on the PC before sending it. Initially, send only boxes if contours are unstable; a correct box overlay is more useful than a broken silhouette effect.
 
-### Definition of done
+### Current implementation evidence
 
-- A walking person retains the same subject ID most of the time.
+- `server/pipeline.py` loads the checkpoint once, warms it once, decodes incoming JPEGs with OpenCV, filters to class `person`, runs BoT-SORT, caps output at six subjects, and emits normalized boxes plus simplified contours.
+- `server/tests/test_pipeline.py` verifies person filtering, confidence ranking, subject cap, normalized coordinates, contour bounds, fallback IDs, and malformed JPEG handling.
+- Device selection is automatic: CUDA device 0 when available, otherwise CPU. The development environment currently reports CPU-only PyTorch, so the RTX 4060 performance gate is still open.
+
+### Definition of done still pending
+
+- A walking person retains the same subject ID most of the time in a live phone-to-PC run.
 - The phone's overlay follows the local preview without obvious stale lag.
 - The server maintains its target rate with six subjects and reports inference time.
 

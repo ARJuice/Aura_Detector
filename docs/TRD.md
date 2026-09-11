@@ -6,7 +6,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Defines the intended technical shape so implementation choices remain compatible end to end.  
-**Current stage:** Transport source exists but has not been physically validated. The model checkpoint and TensorRT engine are intentionally unselected pending measurement.
+**Current stage:** Step 4 vision adapter is implemented and unit/integration tested. Physical walking-person validation and the Android overlay are not complete. The PyTorch `yolo26n-seg.pt` baseline is selected; TensorRT remains deferred pending measurement.
 **Update this file when:** the actual architecture, owned state, dependencies, deployment shape, configuration, or failure behavior differs from this design. Record measured facts, not guesses.
 
 ## 1. Architecture
@@ -40,7 +40,7 @@ The phone always renders its local preview. The PC never returns processed video
 
 - **Client:** Kotlin, Jetpack Compose, CameraX, a custom Canvas/View layer, OkHttp WebSocket.
 - **Server:** Python 3.11+, FastAPI/Uvicorn, OpenCV, NumPy, Ultralytics.
-- **Inference:** smallest supported YOLO person-segmentation checkpoint for baseline; BoT-SORT with ReID disabled.
+- **Inference:** `yolo26n-seg.pt` baseline; BoT-SORT with ReID disabled; COCO class `person` only.
 - **Target acceleration:** fixed-shape 640×640 TensorRT FP16 engine on the demo RTX 4060, only after baseline correctness is measured.
 
 ### Step 4 model baseline
@@ -76,7 +76,8 @@ Start with `yolo26n-seg.pt`: the nano instance-segmentation checkpoint is the fa
 
 - Android source requests camera permission, configures CameraX `STRATEGY_KEEP_ONLY_LATEST`, JPEG-encodes YUV frames, caps sends at 15 FPS, and allows one outstanding frame.
 - Android source sends v1 `hello`/`frame` messages, stores the session token locally, and displays hello/frame-state link status and round-trip latency.
-- Python source accepts the v1 endpoint, validates hello/token/frame ordering, and returns a `frame_state` from the current stub pipeline.
+- Python source accepts the v1 endpoint, validates hello/token/frame ordering, decodes JPEGs, runs the loaded YOLO segmentation/tracking model, filters class `person`, caps six subjects, simplifies contours, and returns normalized `frame_state` metadata.
+- The server loads `yolo26n-seg.pt` once at startup, warms it once, auto-selects CUDA device 0 when PyTorch CUDA is available, and falls back to CPU. The current development environment reported CPU-only PyTorch, so GPU performance is not yet measured.
 - `gradle :app:assembleDebug` has now passed on the development machine.
 - The debug APK has been installed and the camera preview works over a private Windows hotspot; the college captive-portal network is not a supported transport network.
 

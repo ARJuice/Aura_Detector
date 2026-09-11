@@ -2,6 +2,8 @@
 import base64
 import json
 
+import cv2
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
@@ -9,8 +11,15 @@ import server.app as app_module
 from server.app import app, SESSION_TOKEN
 from server.protocol import (
     Hello, HelloAck, Frame, FrameState, ErrorMsg,
-    UNAUTHORIZED
+    INVALID_FRAME, UNAUTHORIZED
 )
+
+
+def make_jpeg() -> bytes:
+    """Return a valid small image so integration tests exercise decode paths."""
+    ok, encoded = cv2.imencode(".jpg", np.zeros((360, 640, 3), dtype=np.uint8))
+    assert ok
+    return encoded.tobytes()
 
 
 @pytest.fixture(autouse=True)
@@ -88,7 +97,7 @@ def test_ws_frame_round_trip(client):
         ws.receive_text()  # hello_ack
 
         # Send a frame
-        jpeg_b64 = base64.b64encode(b"fake-jpeg").decode()
+        jpeg_b64 = base64.b64encode(make_jpeg()).decode()
         ws.send_text(Frame(
             frameId=1, capturedAtMs=1000,
             width=640, height=360, jpeg=jpeg_b64
@@ -98,7 +107,7 @@ def test_ws_frame_round_trip(client):
         state = FrameState.model_validate_json(response)
         assert state.type == "frame_state"
         assert state.frameId == 1
-        assert state.subjects == []  # stub pipeline returns empty
+        assert state.subjects == []  # blank image contains no people
 
 
 def test_ws_frame_ordering(client):
@@ -109,7 +118,7 @@ def test_ws_frame_ordering(client):
         ).model_dump_json())
         ws.receive_text()  # hello_ack
 
-        jpeg_b64 = base64.b64encode(b"fake").decode()
+        jpeg_b64 = base64.b64encode(make_jpeg()).decode()
         # Send frame 5
         ws.send_text(Frame(
             frameId=5, capturedAtMs=1000,
@@ -124,6 +133,26 @@ def test_ws_frame_ordering(client):
         ).model_dump_json())
         response = ws.receive_text()
         err = ErrorMsg.model_validate_json(response)
+        assert err.recoverable is True
+
+
+def test_ws_invalid_jpeg_is_recoverable(client):
+    """A base64-valid but undecodable JPEG gets the frame-specific error."""
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(Hello(
+            version=1, token=SESSION_TOKEN, clientId="t"
+        ).model_dump_json())
+        ws.receive_text()  # hello_ack
+
+        ws.send_text(Frame(
+            frameId=1,
+            capturedAtMs=1000,
+            width=640,
+            height=360,
+            jpeg=base64.b64encode(b"not-a-jpeg").decode(),
+        ).model_dump_json())
+        err = ErrorMsg.model_validate_json(ws.receive_text())
+        assert err.code == INVALID_FRAME
         assert err.recoverable is True
 
 

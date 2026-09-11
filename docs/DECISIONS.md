@@ -3,7 +3,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Records decision rationale so later implementation does not reopen settled choices accidentally.  
-**Current stage:** Stage 0 — ADR-001 through ADR-006 are planning decisions; ADR-007 awaits benchmark evidence.  
+**Current stage:** Stage 4 — the PyTorch segmentation baseline is implemented; physical vision and performance evidence are still pending.  
 **Update this file when:** a meaningful decision is made, reversed, or validated/refuted by measurement. Never rewrite a historical decision; append a superseding ADR.
 
 ## ADR-001: One Local Inference PC
@@ -54,3 +54,10 @@
 **Decision:** Start Step 4 with `yolo26n-seg.pt` in PyTorch, then compare `yolo26s-seg.pt` and export the benchmark winner to a fixed-shape FP16 TensorRT engine only if required.  
 **Why:** Correctness and real end-to-end latency determine model choice, not nominal GPU utilization.  
 **Consequence:** Model artifact/version and benchmark outcome must be recorded before release.
+
+## ADR-008: Automatic Device Selection With CPU Fallback
+
+**Status:** Accepted for development baseline  
+**Decision:** Resolve `AURA_DEVICE=auto` to CUDA device 0 when PyTorch reports CUDA availability; otherwise run on CPU and keep the server usable.  
+**Why:** The same code path must be testable on development machines without a working CUDA build, while the RTX 4060 remains the target performance device.  
+**Consequence:** CPU timings are not release evidence; record the actual CUDA/PyTorch setup before the performance gate.

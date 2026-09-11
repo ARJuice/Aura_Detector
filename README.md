@@ -2,7 +2,7 @@
 
 An intentionally useless Android aura scanner. Point a phone at a crowd; a local PC tracks temporary subjects while the phone supplies the scientifically indefensible aura readings, scans, effects, Geiger clicks, and singularities.
 
-> **Status:** Pre-build documentation complete. The project is not implemented yet.
+> **Status:** Transport is working on a private Windows hotspot; the YOLO person-segmentation server adapter is implemented. Android overlays and aura interactions are next.
 
 ## Start Here
 

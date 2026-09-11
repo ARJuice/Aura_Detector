@@ -1,9 +1,9 @@
 # Aura Detector Internal Documentation
 
 **Audience:** AI agents and project implementers. This folder is not public-facing project copy.  
-**Current project stage:** Build Guide Step 3 — transport is physically validated on a private Windows hotspot.
-**What has been done:** planning documents, Android settings shell, server health/protocol scaffold, latest-frame camera/WebSocket transport, successful debug build/install, and a working camera preview now exist.
-**What happens next:** begin person detection/tracking; keep the private hotspot as the known-good network fallback.
+**Current project stage:** Build Guide Step 4 — the YOLO person-segmentation server adapter is implemented; physical walking-person validation and the Android overlay remain next.
+**What has been done:** planning documents, Android settings shell, server health/protocol scaffold, latest-frame camera/WebSocket transport, successful debug build/install, a working camera preview, and a tested YOLO segmentation/tracking adapter now exist.
+**What happens next:** run the live phone → PC person test, then add the Android subject overlay while keeping the private hotspot as the known-good network fallback.
 
 This folder is the source of truth before implementation begins. All documents describe the **MVP** unless a section explicitly says post-MVP.
 
@@ -37,7 +37,7 @@ Related project material:
 |---|---|---|
 | 0. Planning | Complete | Product, architecture, protocol, UX, test, operations, backlog, and decisions are documented. |
 | 1. Environment / structure | Source exists; manual verification pending | Android settings shell and Python server scaffold exist. Record actual SDK, Python/CUDA, device, and LAN setup in TRD and operations. |
-| 2. Transport | Source complete; manual verification pending | Camera latest-frame JPEG sender, v1 hello/ack, token entry, frame ordering, and status HUD exist. Validate on real hardware. |
-| 3. Vision and overlay | Not started | Record selected model, benchmark, coordinate behavior, and acceptance evidence. |
+| 2. Transport | Physically validated on private hotspot | Camera latest-frame JPEG sender, v1 hello/ack, token entry, frame ordering, status HUD, successful install, and camera preview are verified. |
+| 3. Vision and overlay | Vision server adapter implemented; overlay/manual acceptance pending | `yolo26n-seg.pt` loads once, warms up, decodes JPEGs, filters COCO person, tracks with BoT-SORT, caps six subjects, and emits normalized boxes/contours. Validate with a walking person, then implement the Android overlay. |
 | 4. Aura interaction | Not started | Record implemented scan/value behavior and UX changes. |
 | 5. Performance and release | Not started | Record measured p50/p95, fallback configuration, demo evidence, and release readiness. |

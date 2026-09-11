@@ -7,7 +7,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Prevents Android and server work from inventing incompatible assumptions.  
-**Current stage:** The v1 endpoint and Android client source exist; manual LAN validation is pending.
+**Current stage:** The v1 endpoint and Android client have been validated over the private Windows hotspot; Step 4 now supplies real person-segmentation metadata, while the Android overlay is pending.
 **Update this file when:** before implementing a message, after a contract correction, or before any backward-incompatible change. Keep a compatibility note rather than silently changing established fields.
 
 ## 1. Session Flow
@@ -85,6 +85,7 @@ Known error codes: `UNAUTHORIZED`, `UNSUPPORTED_VERSION`, `INVALID_MESSAGE`, `IN
 - Reject missing/invalid tokens after a short grace period.
 - Reject a frame whose declared dimensions or payload size exceed configured limits.
 - Accept only `person` tracks; return at most six ranked subjects.
+- The current server uses `yolo26n-seg.pt` with BoT-SORT and returns normalized `[x, y, width, height]` boxes plus a simplified normalized contour when a mask is available.
 - Do not echo frame JPEGs or add image-derived biometric information to responses.
 
 ## 4. Ordering and Freshness
