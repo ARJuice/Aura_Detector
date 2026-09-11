@@ -3,7 +3,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Defines the evidence required before claiming a slice or release works.  
-**Current stage:** Server protocol and vision-adapter tests pass locally; the Android overlay, selection, aura-core, and scan slices compile. Selection has passed a physical portrait tap check; the device is currently disconnected, so live-value, scan, landscape, and feedback acceptance remain.
+**Current stage:** Server protocol and vision-adapter tests pass locally; the Android overlay, selection, aura-core, scan, and feedback slices compile. The authorized phone is connected and held `LINK: OK` through frame 130 after the CameraX transform guard; scan, landscape, and full audio/haptic acceptance remain.
 **Update this file when:** a requirement changes, a defect reveals a missing case, a test fixture is added, or release evidence is measured. Do not mark a case passed without executable or manual-test evidence.
 
 ## 1. Test Principles
@@ -48,13 +48,14 @@ Network prerequisite: run the transport test on a direct private hotspot as well
 |---|---|---|
 | Server protocol and vision tests | Passed | `server\\.venv\\Scripts\\python -m pytest server/tests -q` → 30 passed. |
 | Android compilation | Passed | `gradle :app:assembleDebug` completed successfully after fixing project configuration and Kotlin/Compose errors. |
-| Android installation | Passed | Debug APK installs on the authorized phone. |
-| Latest-frame transport | Passed for private hotspot | Phone camera opens and reaches the PC over the Windows hotspot; malformed full-resolution frames are prevented by client-side downsampling. |
+| Android installation | Passed | Latest debug APK, including feedback and the CameraX transform guard, installs on the authorized phone. |
+| Latest-frame transport | Passed for private hotspot | Phone camera opens and reaches the PC over the Windows hotspot; it held `LINK: OK` through `FRAME: 130` after the guard. Malformed full-resolution frames are prevented by client-side downsampling. |
 | Vision | Metadata loop passed; person-track acceptance pending | Phone received `LINK: OK` after the final shared-viewport/crop/rotation path and reached `FRAME: 27` with a 350 ms round trip, without a camera-process crash or CameraX viewport-mismatch warning. The earlier un-cropped smoke observation was `FRAME: 17` at 315 ms. These are not performance results. Walk one person in view and record stable ID, normalized box/contour, and inference time. |
 | Overlay | Baseline built and installed; manual acceptance pending | Phone binds preview and analysis to one CameraX viewport, transmits the matching cropped/upright image, and uses a source-to-preview transform with that same rotation for the Canvas overlay. Verify a person box follows the preview in portrait, then rotate to landscape and check again. |
 | Selection | Implemented; portrait tap check passed | The phone selected `#565` from a tap at `(500, 900)` and displayed `SELECTED: #565`; verify switching subjects and expiry cleanup during a walking-person run. |
-| Aura core | Implemented; physical live-value check pending | Android parses the server profile and generates a local bounded reading for the selected track; point the phone at a person, tap them, and verify the displayed `AUR/s` changes without a new network field per tick. |
+| Aura core | Implemented; initial phone observation passed | Android displayed `SELECTED: #156  565 AUR/s` on the authorized phone while receiving frame 50. Verify movement stays within its band and cover the named-infinity path. |
 | Scan | Implemented; physical device check pending | Double-tap the selected subject, verify the centered one-second scanning card/progress bar, then verify base, modifier, final, classification, and both named infinity paths. |
+| Feedback | Implemented; control check passed | The scanner exposed `SOUND ON`; tapping it changed the visible control to `SOUND OFF` while `LINK: OK` continued through frame 130. Verify real scan tone, haptic, pulse readability, and mute behavior on the target phone. |
 
 ## 4. Performance Measurement
 

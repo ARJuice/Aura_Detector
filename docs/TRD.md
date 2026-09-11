@@ -6,7 +6,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Defines the intended technical shape so implementation choices remain compatible end to end.  
-**Current stage:** Step 8 Android overlay, selection, local aura-core logic, and local scan logic are implemented in the build. Portrait tracking and a physical tap selection are confirmed; live-value, scan, landscape, and feedback acceptance remain. The PyTorch `yolo26n-seg.pt` baseline is selected; TensorRT remains deferred pending measurement.
+**Current stage:** Step 8 Android overlay, selection, local aura-core/scan logic, and feedback are implemented in the build. The authorized phone held a live link through frame 130 after the CameraX transform guard; full scan, audio/haptic, landscape, and performance acceptance remain. The PyTorch `yolo26n-seg.pt` baseline is selected; TensorRT remains deferred pending measurement.
 **Update this file when:** the actual architecture, owned state, dependencies, deployment shape, configuration, or failure behavior differs from this design. Record measured facts, not guesses.
 
 ## 1. Architecture
@@ -85,6 +85,7 @@ Start with `yolo26n-seg.pt`: the nano instance-segmentation checkpoint is the fa
 - Android projects the same geometry used for drawing into contour/box hit regions; a tap selects one track, highlights its outline, shows `SELECTED: #id`, and clears selection when the current frame no longer contains that ID.
 - Android parses each server `profile` and runs a phone-local bounded random walk only for the selected track. Finite bands stay within their declared minimum/maximum; the named `∞` band is displayed as `∞ AUR/s` without floating-point arithmetic or network updates.
 - Android handles selected-track double-tap locally: a 1-second scanning state transitions to a result card with signed base, blessing/curse modifier, final value, and classification; `+∞`/`−∞` are named states rather than arithmetic operands.
+- Scan feedback stays on the phone: the safe-centered card pulses only when Android animations are enabled, `ToneGenerator` supplies an optional cue, `VibrationEffect` supplies short haptics, and a visible session mute control disables sound without hiding visual information.
 
 ## 5. Data Boundaries
 

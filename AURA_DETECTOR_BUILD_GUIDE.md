@@ -1,7 +1,7 @@
 # Aura Detector — Internal Build Guide
 
 **Audience:** AI agents and implementers.  
-**Current stage:** Step 8 — the Android subject-overlay baseline, tap selection, local aura-core, and local scan implementations compile; physical live-value/scan acceptance and feedback are next.
+**Current stage:** Step 8 — the Android subject-overlay baseline, tap selection, local aura-core, local scan, and feedback implementations compile and install. Physical scan/audio/haptic acceptance and performance measurement remain.
 **Purpose:** Turns the product/technical documents into the safest next execution order.  
 **Update this file when:** a phase starts or finishes, an actual command/setup differs, a benchmark changes the recommended model/configuration, or a discovered constraint changes the build order. Do not claim a phase is complete without its stated definition-of-done evidence.
 
@@ -192,7 +192,8 @@ Use log-space movement for broad ranges and clamp every finite result to its ban
 - `ScannerScreen` owns one bounded `AuraValueGenerator` per selected track, updates the selected value locally every 160 ms, clamps finite bands, and treats `∞` as a named display state.
 - `ScannerScreen` handles selected-subject double-taps with a one-second local scan, deterministic finite/infinity result generator, and a result card containing base, modifier, final, and classification.
 - The scan card is explicitly top-layered in a safe center region with a visible progress bar; subject labels and live readings are clamped inside the preview instead of being drawn above an off-screen box.
-- The APK compiles; the authorized phone is currently disconnected, so live-value and scan behavior still need on-device verification.
+- The scan card now has a reduced-motion-aware pulse. Scan start/completion use brief system haptics and optional `ToneGenerator` cues; the visible `SOUND ON`/`SOUND OFF` control mutes only audio.
+- The debug APK installs on the authorized phone and held `LINK: OK` through `FRAME: 130` after a CameraX main-thread transform guard. Live reading and scan/feedback behavior still need their full manual acceptance run.
 
 ### Definition of done
 

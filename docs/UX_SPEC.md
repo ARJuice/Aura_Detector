@@ -3,7 +3,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Defines user-visible states and gesture behavior before implementation spreads them across camera, overlay, and HUD code.  
-**Current stage:** Stage 8 — subject tracking, aligned contours, temporary IDs, single-subject tap selection, local live readings, and the double-tap scan card are implemented; effects remain planned.
+**Current stage:** Stage 8 — subject tracking, aligned contours, temporary IDs, single-subject tap selection, local live readings, double-tap scan, and baseline feedback are implemented; physical feedback acceptance remains.
 **Update this file when:** a gesture, state transition, accessibility behavior, label, or error presentation changes in the built app.
 
 ## 1. Screen Structure
@@ -48,7 +48,7 @@ Brighter aura, targeting reticle, persistent ID, and a smooth non-negative `AUR/
 
 ### Scanning
 
-Freeze only the scan presentation, never the camera preview. Show a safe-area-centered `SCANNING SUBJECT NN…` card with a visible progress bar and fake calibration phrases. Keep the completed result card centered and block repeated scan triggers until the current scan finishes.
+Freeze only the scan presentation, never the camera preview. Show a safe-area-centered `SCANNING SUBJECT NN…` card with a visible progress bar, a restrained pulse when system animations are enabled, and fake calibration phrases. Trigger a short optional tone and non-essential haptic at scan start/completion. Keep the completed result card centered and block repeated scan triggers until the current scan finishes.
 
 ### Result
 
@@ -66,7 +66,7 @@ Show a compact card with base, one modifier, final result, and classification. T
 - Never communicate selection or result class through colour alone; retain text/icon/shape cues.
 - Use sufficient contrast for primary labels over the camera preview; draw a shadow/backplate when necessary.
 - Respect the device's animation-reduction setting by reducing particles/glitch intensity.
-- Sound is optional and muteable; haptics never carry unique required information.
+- Sound is optional and muteable through the visible session `SOUND ON`/`SOUND OFF` control; haptics never carry unique required information.
 - Interactive targets outside moving subjects use standard Android touch target sizing.
 
 ## 6. Coordinate and Gesture Rules

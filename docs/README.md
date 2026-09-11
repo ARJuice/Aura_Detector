@@ -1,9 +1,9 @@
 # Aura Detector Internal Documentation
 
 **Audience:** AI agents and project implementers. This folder is not public-facing project copy.  
-**Current project stage:** Build Guide Step 8 — the Android subject overlay, tap selection, local live reading, and local double-tap scan implementation compile; physical live-value/scan acceptance is next.
-**What has been done:** planning documents, Android settings shell, server health/protocol scaffold, latest-frame camera/WebSocket transport, a working camera preview, live YOLO person tracking, aligned subject overlays, phone-validated tap selection, a bounded local aura random walk, and a local scan state machine now exist.
-**What happens next:** reconnect the authorized phone, verify the selected `AUR/s` and scan card, then implement readable effects/audio/haptics while keeping the private hotspot as the known-good network fallback.
+**Current project stage:** Build Guide Step 8 — the Android subject overlay, tap selection, local live reading/scan, and feedback implementation compile and install; physical scan/audio/haptic and performance acceptance are next.
+**What has been done:** planning documents, Android settings shell, server health/protocol scaffold, latest-frame camera/WebSocket transport, a working camera preview, live YOLO person tracking, aligned subject overlays, phone-validated tap selection, a bounded local aura random walk, a local scan state machine, and local pulse/tone/haptic feedback now exist.
+**What happens next:** run the manual scan acceptance on the authorized phone—confirm the selected `AUR/s`, centered scan card, pulse, audio/haptics, and mute control—then measure the final target configuration while keeping the private hotspot as the known-good network fallback.
 
 This folder is the source of truth before implementation begins. All documents describe the **MVP** unless a section explicitly says post-MVP.
 

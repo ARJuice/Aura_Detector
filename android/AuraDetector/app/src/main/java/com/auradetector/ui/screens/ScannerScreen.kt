@@ -1,7 +1,16 @@
 package com.auradetector.ui.screens
 
 import android.Manifest
+import android.animation.ValueAnimator
 import android.content.Context
+import android.media.AudioManager
+import android.media.ToneGenerator
+import android.os.Build
+import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.util.Log
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
@@ -24,6 +33,7 @@ import androidx.camera.view.PreviewView
 import androidx.camera.view.transform.CoordinateTransform
 import androidx.camera.view.transform.ImageProxyTransformFactory
 import androidx.camera.view.transform.OutputTransform
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -123,6 +133,12 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
     var scanProgress by remember { mutableStateOf(0f) }
     var scanResult by remember { mutableStateOf<AuraScanResult?>(null) }
     val scanGenerators = remember { mutableMapOf<Long, AuraScanGenerator>() }
+    var soundEnabled by remember { mutableStateOf(true) }
+    val latestSoundEnabled = rememberUpdatedState(soundEnabled)
+    val feedback = remember(context) { ScanFeedback(context) }
+    DisposableEffect(feedback) {
+        onDispose { feedback.release() }
+    }
     LaunchedEffect(frameState) {
         if (selectedSubjectId != null && frameState?.subjects?.none { it.id == selectedSubjectId } != false) {
             selectedSubjectId = null
@@ -156,6 +172,7 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
             scanProgress = 0f
             return@LaunchedEffect
         }
+        feedback.scanStarted(latestSoundEnabled.value)
         scanResult = null
         val startedAt = System.currentTimeMillis()
         try {
@@ -173,6 +190,9 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
                 scanResult = null
             }
         }
+    }
+    LaunchedEffect(scanResult) {
+        if (scanResult != null) feedback.scanCompleted(latestSoundEnabled.value)
     }
     DisposableEffect(transport) {
         transport.connect()
@@ -213,6 +233,8 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
                 scanResult != null -> "SCAN READY #${scanningSubjectId}"
                 else -> null
             },
+            soundEnabled = soundEnabled,
+            onToggleSound = { soundEnabled = !soundEnabled },
             onExit = onExit
         )
     }
@@ -236,8 +258,15 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
     }
 
     DisposableEffect(lifecycleOwner, transport) {
+        var disposed = false
         val updatePreviewTransform = {
-            previewOutputTransform.set(previewView.outputTransform)
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                previewOutputTransform.set(previewView.outputTransform)
+            } else {
+                previewView.post {
+                    if (!disposed) previewOutputTransform.set(previewView.outputTransform)
+                }
+            }
         }
         val layoutListener = android.view.View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             updatePreviewTransform()
@@ -248,7 +277,6 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
         previewView.addOnLayoutChangeListener(layoutListener)
         previewView.previewStreamState.observe(lifecycleOwner, streamObserver)
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-        var disposed = false
         fun bindCamera() {
             if (disposed) return
             val viewPort = previewView.viewPort
@@ -280,6 +308,9 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
                                     sourceToPreview = transform
                                 )
                             }
+                        } catch (error: Exception) {
+                            // A transient CameraX transform/frame failure must not terminate the scanner process.
+                            Log.w("AuraDetector", "Skipping unavailable camera frame", error)
                         } finally {
                             image.close()
                         }
@@ -498,6 +529,43 @@ private data class AuraScanResult(
     val classification: String
 )
 
+/**
+ * Short, non-essential local feedback. The visible scan state always communicates progress and
+ * completion, so sound and vibration can never be the only way to understand a result.
+ */
+private class ScanFeedback(context: Context) {
+    private val toneGenerator = ToneGenerator(AudioManager.STREAM_MUSIC, 55)
+    private val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        context.getSystemService(VibratorManager::class.java)?.defaultVibrator
+    } else {
+        @Suppress("DEPRECATION")
+        context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+    }
+
+    fun scanStarted(soundEnabled: Boolean) {
+        vibrate(longArrayOf(0, 24), -1)
+        if (soundEnabled) toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 70)
+    }
+
+    fun scanCompleted(soundEnabled: Boolean) {
+        vibrate(longArrayOf(0, 34, 52, 82), -1)
+        if (soundEnabled) toneGenerator.startTone(ToneGenerator.TONE_PROP_ACK, 180)
+    }
+
+    fun release() = toneGenerator.release()
+
+    private fun vibrate(pattern: LongArray, repeat: Int) {
+        val device = vibrator ?: return
+        if (!device.hasVibrator()) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            device.vibrate(VibrationEffect.createWaveform(pattern, repeat))
+        } else {
+            @Suppress("DEPRECATION")
+            device.vibrate(pattern, repeat)
+        }
+    }
+}
+
 private class AuraScanGenerator(subjectId: Long) {
     private val random = Random(subjectId.toInt() xor 0x51A7C0DE)
 
@@ -551,6 +619,22 @@ private class AuraScanGenerator(subjectId: Long) {
 @Composable
 private fun ScanOverlay(subjectId: Long?, progress: Float, result: AuraScanResult?) {
     if (subjectId == null) return
+    val animationsEnabled = remember { ValueAnimator.areAnimatorsEnabled() }
+    val scanPulse = if (animationsEnabled && result == null) {
+        val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "scanPulse")
+        val pulse by transition.animateFloat(
+            initialValue = 0.35f,
+            targetValue = 0.95f,
+            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                animation = androidx.compose.animation.core.tween(420),
+                repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+            ),
+            label = "scanPulseAlpha"
+        )
+        pulse
+    } else {
+        1f
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -562,8 +646,8 @@ private fun ScanOverlay(subjectId: Long?, progress: Float, result: AuraScanResul
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(24.dp)
-                .background(DarkNavy.copy(alpha = 0.94f))
-                .border(2.dp, if (result == null) OrangeWarning else NeonGreen)
+                .background(DarkNavy.copy(alpha = if (result == null) 0.90f + scanPulse * 0.04f else 0.94f))
+                .border(2.dp, (if (result == null) OrangeWarning else NeonGreen).copy(alpha = scanPulse))
                 .padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -581,7 +665,7 @@ private fun ScanOverlay(subjectId: Long?, progress: Float, result: AuraScanResul
                         modifier = Modifier
                             .fillMaxWidth(progress.coerceIn(0f, 1f))
                             .height(8.dp)
-                            .background(OrangeWarning)
+                            .background(OrangeWarning.copy(alpha = scanPulse))
                     )
                 }
                 Text("NEGOTIATING WITH THE FIELD", color = CyanAccent)
@@ -649,6 +733,8 @@ private fun ScannerHud(
     selectedSubjectId: Long?,
     liveReading: String?,
     scanStatus: String?,
+    soundEnabled: Boolean,
+    onToggleSound: () -> Unit,
     onExit: () -> Unit
 ) {
     val color = when (status.state) {
@@ -680,6 +766,15 @@ private fun ScannerHud(
         ) {
             Text("AURA RADIATION MONITOR", color = CyanAccent)
             Text(text, color = color)
+        }
+        Button(
+            onClick = onToggleSound,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 142.dp, end = 16.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = DarkNavy.copy(alpha = 0.90f))
+        ) {
+            Text(if (soundEnabled) "SOUND ON" else "SOUND OFF", color = CyanAccent)
         }
         Button(
             onClick = onExit,
