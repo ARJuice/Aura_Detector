@@ -1,5 +1,6 @@
 package com.auradetector.ui.screens
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -30,6 +31,8 @@ import java.util.concurrent.TimeUnit
 enum class ConnectionStatus {
     IDLE, TESTING, OK, FAILED
 }
+
+private const val SETTINGS_LOG_TAG = "AuraSettings"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -142,21 +145,27 @@ fun SettingsScreen(
                             .url(currentConfig.healthUrl)
                             .build()
                         
-                        val response = withContext(Dispatchers.IO) {
-                            client.newCall(request).execute()
+                        val responseCode = withContext(Dispatchers.IO) {
+                            client.newCall(request).execute().use { response ->
+                                response.code
+                            }
                         }
-                        
-                        if (response.isSuccessful) {
+
+                        if (responseCode in 200..299) {
+                            try {
+                                repository.saveConfig(currentConfig)
+                            } catch (saveError: Exception) {
+                                Log.w(SETTINGS_LOG_TAG, "Could not save server settings", saveError)
+                            }
                             status = ConnectionStatus.OK
-                            repository.saveConfig(currentConfig)
                         } else {
                             status = ConnectionStatus.FAILED
-                            errorMessage = "HTTP ${response.code}"
+                            errorMessage = "HTTP $responseCode"
                         }
-                        response.close()
                     } catch (e: Exception) {
+                        Log.e(SETTINGS_LOG_TAG, "Connection test failed", e)
                         status = ConnectionStatus.FAILED
-                        errorMessage = e.message ?: "Unknown Error"
+                        errorMessage = e.message ?: e.javaClass.simpleName
                     }
                 }
             },

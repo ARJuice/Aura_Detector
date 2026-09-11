@@ -109,8 +109,8 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
                 .also { imageAnalysis ->
                     imageAnalysis.setAnalyzer(analyzerExecutor) { image ->
                         try {
-                            val jpeg = image.toJpeg()
-                            transport.sendFrame(jpeg, image.width, image.height)
+                            val frame = image.toJpeg()
+                            transport.sendFrame(frame.bytes, frame.width, frame.height)
                         } finally {
                             image.close()
                         }
@@ -194,35 +194,49 @@ private fun PermissionRequired(onRequestPermission: () -> Unit) {
     }
 }
 
-private fun ImageProxy.toJpeg(quality: Int = 70): ByteArray {
-    require(format == ImageFormat.YUV_420_888) { "Expected YUV_420_888 camera frame" }
-    val nv21 = ByteArray(width * height * ImageFormat.getBitsPerPixel(ImageFormat.NV21) / 8)
-    copyPlane(planes[0], width, height, nv21, 0, 1)
-    copyChromaPlanes(planes[1], planes[2], width, height, nv21, width * height)
+private data class JpegFrame(val bytes: ByteArray, val width: Int, val height: Int)
 
-    return ByteArrayOutputStream().use { stream ->
-        YuvImage(nv21, ImageFormat.NV21, width, height, null)
-            .compressToJpeg(Rect(0, 0, width, height), quality, stream)
+private fun ImageProxy.toJpeg(quality: Int = 70, maxLongEdge: Int = 640): JpegFrame {
+    require(format == ImageFormat.YUV_420_888) { "Expected YUV_420_888 camera frame" }
+    val sourceLongEdge = maxOf(width, height)
+    val targetWidth = if (sourceLongEdge <= maxLongEdge) width else {
+        maxOf(2, (width.toLong() * maxLongEdge / sourceLongEdge).toInt() and 1.inv())
+    }
+    val targetHeight = if (sourceLongEdge <= maxLongEdge) height else {
+        maxOf(2, (height.toLong() * maxLongEdge / sourceLongEdge).toInt() and 1.inv())
+    }
+    val nv21 = ByteArray(targetWidth * targetHeight * ImageFormat.getBitsPerPixel(ImageFormat.NV21) / 8)
+    copyPlane(planes[0], width, height, targetWidth, targetHeight, nv21, 0)
+    copyChromaPlanes(
+        planes[1], planes[2], width, height, targetWidth, targetHeight, nv21, targetWidth * targetHeight
+    )
+
+    val jpeg = ByteArrayOutputStream().use { stream ->
+        YuvImage(nv21, ImageFormat.NV21, targetWidth, targetHeight, null)
+            .compressToJpeg(Rect(0, 0, targetWidth, targetHeight), quality, stream)
         stream.toByteArray()
     }
+    return JpegFrame(jpeg, targetWidth, targetHeight)
 }
 
 private fun copyPlane(
     plane: ImageProxy.PlaneProxy,
-    width: Int,
-    height: Int,
+    sourceWidth: Int,
+    sourceHeight: Int,
+    targetWidth: Int,
+    targetHeight: Int,
     output: ByteArray,
-    outputOffset: Int,
-    outputStride: Int
+    outputOffset: Int
 ) {
     val buffer = plane.buffer
     val start = buffer.position()
-    var outputIndex = outputOffset
-    for (row in 0 until height) {
-        val rowStart = start + row * plane.rowStride
-        for (column in 0 until width) {
-            output[outputIndex] = buffer.get(rowStart + column * plane.pixelStride)
-            outputIndex += outputStride
+    for (targetRow in 0 until targetHeight) {
+        val sourceRow = targetRow * sourceHeight / targetHeight
+        val rowStart = start + sourceRow * plane.rowStride
+        for (targetColumn in 0 until targetWidth) {
+            val sourceColumn = targetColumn * sourceWidth / targetWidth
+            output[outputOffset + targetRow * targetWidth + targetColumn] =
+                buffer.get(rowStart + sourceColumn * plane.pixelStride)
         }
     }
 }
@@ -230,8 +244,10 @@ private fun copyPlane(
 private fun copyChromaPlanes(
     uPlane: ImageProxy.PlaneProxy,
     vPlane: ImageProxy.PlaneProxy,
-    width: Int,
-    height: Int,
+    sourceWidth: Int,
+    sourceHeight: Int,
+    targetWidth: Int,
+    targetHeight: Int,
     output: ByteArray,
     outputOffset: Int
 ) {
@@ -240,10 +256,16 @@ private fun copyChromaPlanes(
     val uStart = uBuffer.position()
     val vStart = vBuffer.position()
     var outputIndex = outputOffset
-    for (row in 0 until height / 2) {
-        for (column in 0 until width / 2) {
-            output[outputIndex++] = vBuffer.get(vStart + row * vPlane.rowStride + column * vPlane.pixelStride)
-            output[outputIndex++] = uBuffer.get(uStart + row * uPlane.rowStride + column * uPlane.pixelStride)
+    for (targetRow in 0 until targetHeight / 2) {
+        val sourceRow = targetRow * sourceHeight / targetHeight
+        for (targetColumn in 0 until targetWidth / 2) {
+            val sourceColumn = targetColumn * sourceWidth / targetWidth
+            output[outputIndex++] = vBuffer.get(
+                vStart + sourceRow * vPlane.rowStride + sourceColumn * vPlane.pixelStride
+            )
+            output[outputIndex++] = uBuffer.get(
+                uStart + sourceRow * uPlane.rowStride + sourceColumn * uPlane.pixelStride
+            )
         }
     }
 }

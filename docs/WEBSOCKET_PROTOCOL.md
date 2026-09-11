@@ -7,7 +7,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Prevents Android and server work from inventing incompatible assumptions.  
-**Current stage:** The v1 endpoint and Android client have been validated over the private Windows hotspot; Step 4 now supplies real person-segmentation metadata, while the Android overlay is pending.
+**Current stage:** The v1 endpoint and Android client have exchanged live `frame_state` metadata over the private Windows hotspot; Step 4 person-track validation and the Android overlay are pending.
 **Update this file when:** before implementing a message, after a contract correction, or before any backward-incompatible change. Keep a compatibility note rather than silently changing established fields.
 
 ## 1. Session Flow

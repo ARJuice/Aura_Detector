@@ -49,8 +49,8 @@ Network prerequisite: run the transport test on a direct private hotspot as well
 | Server protocol and vision tests | Passed | `server\\.venv\\Scripts\\python -m pytest server/tests -q` → 30 passed. |
 | Android compilation | Passed | `gradle :app:assembleDebug` completed successfully after fixing project configuration and Kotlin/Compose errors. |
 | Android installation | Passed | Debug APK installs on the authorized phone. |
-| Latest-frame transport | Passed for private hotspot | Phone camera opens and reaches the PC over the Windows hotspot; keep checking frame IDs/latency as vision is added. |
-| Vision | Adapter implemented; physical acceptance pending | Start the server, connect the already-working phone transport, walk one person in view, and record stable ID, normalized box/contour, and inference time. |
+| Latest-frame transport | Passed for private hotspot | Phone camera opens and reaches the PC over the Windows hotspot; malformed full-resolution frames are prevented by client-side downsampling. |
+| Vision | Metadata loop passed; person-track acceptance pending | Phone received `LINK: OK`, `FRAME: 17`, and a 315 ms round trip from the YOLO server. Walk one person in view and record stable ID, normalized box/contour, and inference time. |
 
 ## 4. Performance Measurement
 

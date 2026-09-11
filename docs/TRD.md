@@ -6,7 +6,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Defines the intended technical shape so implementation choices remain compatible end to end.  
-**Current stage:** Step 4 vision adapter is implemented and unit/integration tested. Physical walking-person validation and the Android overlay are not complete. The PyTorch `yolo26n-seg.pt` baseline is selected; TensorRT remains deferred pending measurement.
+**Current stage:** Step 4 vision adapter and phone-to-server metadata loop are physically validated. Physical walking-person validation and the Android overlay are not complete. The PyTorch `yolo26n-seg.pt` baseline is selected; TensorRT remains deferred pending measurement.
 **Update this file when:** the actual architecture, owned state, dependencies, deployment shape, configuration, or failure behavior differs from this design. Record measured facts, not guesses.
 
 ## 1. Architecture
@@ -74,12 +74,13 @@ Start with `yolo26n-seg.pt`: the nano instance-segmentation checkpoint is the fa
 
 ### Current implementation evidence
 
-- Android source requests camera permission, configures CameraX `STRATEGY_KEEP_ONLY_LATEST`, JPEG-encodes YUV frames, caps sends at 15 FPS, and allows one outstanding frame.
+- Android source requests camera permission, configures CameraX `STRATEGY_KEEP_ONLY_LATEST`, downsamples YUV frames to a maximum 640-pixel long edge before JPEG encoding, caps sends at 15 FPS, and allows one outstanding frame.
 - Android source sends v1 `hello`/`frame` messages, stores the session token locally, and displays hello/frame-state link status and round-trip latency.
 - Python source accepts the v1 endpoint, validates hello/token/frame ordering, decodes JPEGs, runs the loaded YOLO segmentation/tracking model, filters class `person`, caps six subjects, simplifies contours, and returns normalized `frame_state` metadata.
 - The server loads `yolo26n-seg.pt` once at startup, warms it once, auto-selects CUDA device 0 when PyTorch CUDA is available, and falls back to CPU. The current development environment reported CPU-only PyTorch, so GPU performance is not yet measured.
 - `gradle :app:assembleDebug` has now passed on the development machine.
 - The debug APK has been installed and the camera preview works over a private Windows hotspot; the college captive-portal network is not a supported transport network.
+- The physical phone now receives `frame_state` acknowledgements from the YOLO server over the hotspot. One observed round trip was 315 ms; this is a smoke-test observation, not a p50/p95 performance result.
 
 ## 5. Data Boundaries
 
@@ -94,7 +95,7 @@ Keep the first configuration surface small:
 
 | Key | Initial value |
 |---|---:|
-| Input JPEG size | 640×360 |
+| Input JPEG size | Maximum 640-pixel long edge; aspect ratio preserved |
 | JPEG quality | 70 |
 | Send cap | 12–15 FPS |
 | Inference size | 640×640 |

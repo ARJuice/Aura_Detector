@@ -126,8 +126,10 @@ Return normalized coordinates so each phone layout can scale them correctly:
 ### Current implementation evidence
 
 - `server/pipeline.py` loads the checkpoint once, warms it once, decodes incoming JPEGs with OpenCV, filters to class `person`, runs BoT-SORT, caps output at six subjects, and emits normalized boxes plus simplified contours.
+- `ScannerScreen.kt` downscales every camera payload to a maximum 640-pixel long edge before JPEG encoding; a high-resolution camera frame therefore cannot violate the protocol's 1920×1080 input limit.
 - `server/tests/test_pipeline.py` verifies person filtering, confidence ranking, subject cap, normalized coordinates, contour bounds, fallback IDs, and malformed JPEG handling.
 - Device selection is automatic: CUDA device 0 when available, otherwise CPU. The development environment currently reports CPU-only PyTorch, so the RTX 4060 performance gate is still open.
+- The private-hotspot smoke test has received a live `frame_state` (`FRAME: 17`, 315 ms); this is not yet a person-track or p95 performance acceptance result.
 
 ### Definition of done still pending
 
