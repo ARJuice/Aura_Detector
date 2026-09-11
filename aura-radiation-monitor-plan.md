@@ -350,7 +350,7 @@ The phone can own the animation after receiving the subject’s profile. The PC 
 
 ### Selected model: YOLO small instance segmentation in TensorRT FP16
 
-Use `yolo26s-seg.pt` as the intended quality model, assuming the installed Ultralytics version supports it. It provides per-person masks, boxes, and confidence scores. Instance masks are what allow the aura to follow a person instead of being only a glowing rectangle. Export the selected checkpoint to a **fixed-shape TensorRT FP16 engine** on the RTX 4060 PC before the event. [Ultralytics segmentation documentation](https://docs.ultralytics.com/tasks/segment/)
+Use `yolo26n-seg.pt` as the Step 4 correctness baseline. It provides per-person masks, boxes, and confidence scores while minimizing latency during initial integration. Instance masks are what allow the aura to follow a person instead of being only a glowing rectangle. After the pipeline works, benchmark `yolo26s-seg.pt` as the intended quality candidate and export the selected checkpoint to a **fixed-shape TensorRT FP16 engine** on the RTX 4060 PC before the event. [Ultralytics segmentation documentation](https://docs.ultralytics.com/tasks/segment/)
 
 Use a fixed `640×640` inference input and batch size `1`. Warm the engine before the demo begins. Fixed shapes avoid runtime shape-switch overhead, while FP16 is the appropriate first performance optimization for the RTX 4060. [NVIDIA TensorRT performance guidance](https://docs.nvidia.com/deeplearning/tensorrt/latest/performance/optimization.html)
 

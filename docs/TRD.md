@@ -43,7 +43,9 @@ The phone always renders its local preview. The PC never returns processed video
 - **Inference:** smallest supported YOLO person-segmentation checkpoint for baseline; BoT-SORT with ReID disabled.
 - **Target acceleration:** fixed-shape 640×640 TensorRT FP16 engine on the demo RTX 4060, only after baseline correctness is measured.
 
-Final model checkpoint selection is **decision pending** until the target hardware benchmark compares supported nano/small segmentation models. The selection must meet NFR-01 and NFR-02; a larger model is not a goal.
+### Step 4 model baseline
+
+Start with `yolo26n-seg.pt`: the nano instance-segmentation checkpoint is the fastest correctness baseline and supplies the person masks needed by the aura overlay. Configure `imgsz=640`, `classes=[0]`, `tracker="botsort.yaml"`, and `device=0` on the RTX 4060. Keep `yolo26s-seg.pt` as the quality candidate to benchmark only after the `n-seg` pipeline is correct. Final model selection remains measurement-driven and must meet NFR-01 and NFR-02.
 
 ## 4. Data and State
 

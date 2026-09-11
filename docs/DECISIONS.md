@@ -50,7 +50,7 @@
 
 ## ADR-007: TensorRT Is a Measured Optimization
 
-**Status:** Pending benchmark  
-**Decision:** First validate a supported PyTorch YOLO segmentation baseline, then export the benchmark winner to a fixed-shape FP16 TensorRT engine if required.  
+**Status:** Baseline accepted; final quality model pending benchmark  
+**Decision:** Start Step 4 with `yolo26n-seg.pt` in PyTorch, then compare `yolo26s-seg.pt` and export the benchmark winner to a fixed-shape FP16 TensorRT engine only if required.  
 **Why:** Correctness and real end-to-end latency determine model choice, not nominal GPU utilization.  
 **Consequence:** Model artifact/version and benchmark outcome must be recorded before release.
