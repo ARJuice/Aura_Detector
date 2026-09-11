@@ -1,0 +1,110 @@
+# Technical Requirements Document — AUR/S
+
+**Status:** Draft v0.1  
+**Scope:** Local-network Android demo MVP
+
+## AI Maintenance Context
+
+**Purpose:** Defines the intended technical shape so implementation choices remain compatible end to end.  
+**Current stage:** Stage 0 — this is a design baseline, not a description of running software. The model checkpoint and TensorRT engine are intentionally unselected pending measurement.  
+**Update this file when:** the actual architecture, owned state, dependencies, deployment shape, configuration, or failure behavior differs from this design. Record measured facts, not guesses.
+
+## 1. Architecture
+
+```mermaid
+flowchart LR
+    C[Android CameraX preview] --> A[Latest-frame JPEG sender]
+    A -->|WebSocket + session token| W[Python WebSocket server]
+    W --> Q[Single newest-frame slot]
+    Q --> V[YOLO person segmentation + tracker]
+    V --> P[Track/profile state]
+    P -->|frame_state JSON| O[Android overlay renderer]
+    O --> U[Selection, scan, audio, haptics]
+```
+
+The phone always renders its local preview. The PC never returns processed video—only compact metadata. Each boundary retains at most one frame so latency cannot grow from queued work.
+
+## 2. Components and Responsibilities
+
+| Component | Responsibility | Does not do |
+|---|---|---|
+| Android camera | Preview and latest-frame JPEG creation | Detection or server-side tracking |
+| Android socket client | Connection, token, frame ID order, reconnect | Queuing historical frames |
+| Android overlay | Coordinate transform, rendering, hit-testing, effects | Person identity or inference |
+| Android aura engine | Live-value animation, scan result, formatter | Network synchronization per digit |
+| Python service | Health endpoint, WebSocket session, metrics | Persistent account management |
+| Vision pipeline | Decode, person-only segmentation, tracking, contour simplification | Face recognition or storage |
+| Track/profile store | Temporary track lifecycle and profile assignment | Database persistence |
+
+## 3. Technology Baseline
+
+- **Client:** Kotlin, Jetpack Compose, CameraX, a custom Canvas/View layer, OkHttp WebSocket.
+- **Server:** Python 3.11+, FastAPI/Uvicorn, OpenCV, NumPy, Ultralytics.
+- **Inference:** smallest supported YOLO person-segmentation checkpoint for baseline; BoT-SORT with ReID disabled.
+- **Target acceleration:** fixed-shape 640×640 TensorRT FP16 engine on the demo RTX 4060, only after baseline correctness is measured.
+
+Final model checkpoint selection is **decision pending** until the target hardware benchmark compares supported nano/small segmentation models. The selection must meet NFR-01 and NFR-02; a larger model is not a goal.
+
+## 4. Data and State
+
+### Connection state
+
+`CONNECTING → OK → DEGRADED → OFFLINE`
+
+- `OK`: a current response arrives inside the freshness threshold.
+- `DEGRADED`: connection exists but the last accepted metadata is older than the freshness threshold.
+- `OFFLINE`: socket is closed or reconnect attempts fail.
+
+### Subject state
+
+`candidate → confirmed → lost-grace → expired`
+
+- Confirm after 3 consecutive detections.
+- Retain a lost track for roughly 1 second, fading its overlay.
+- Delete profile and selection when the track expires.
+
+### Frame policy
+
+- Client capture: CameraX `STRATEGY_KEEP_ONLY_LATEST`.
+- Network sender: one in-flight frame and one replaceable pending frame at most.
+- Server: one replaceable newest decoded frame awaiting inference.
+- Client renderer: accept only a `frame_state` newer than its last accepted `frameId`.
+
+## 5. Data Boundaries
+
+- Source image pixels exist only in transit and working memory; no frame persistence.
+- Server response contains frame ID, timing, temporary track ID, confidence, normalized box, optional simplified contour, and first-seen profile.
+- All visual/anomaly outputs are client-generated fictional content.
+- Timestamp telemetry contains no user identifier or image content.
+
+## 6. Configuration
+
+Keep the first configuration surface small:
+
+| Key | Initial value |
+|---|---:|
+| Input JPEG size | 640×360 |
+| JPEG quality | 70 |
+| Send cap | 12–15 FPS |
+| Inference size | 640×640 |
+| Maximum subjects | 6 |
+| Confirmation frames | 3 |
+| Lost-track grace | 1 second |
+| Metadata target | <20 KB/frame |
+
+Configuration is local development configuration, not a remote-admin feature.
+
+## 7. Reliability and Failure Behavior
+
+- Drop old frames rather than delay new ones.
+- Return a structured protocol error for invalid messages; keep the service process alive.
+- Client backs off reconnect attempts and exposes the state in the HUD.
+- Warm the selected model once at startup; health reports `ready` only after it can infer.
+- On model failure, server returns `server_unavailable`; client retains preview and disables live claims.
+
+## 8. Dependencies and Constraints
+
+- Both devices must share a private local network.
+- The target Android device must support CameraX and the selected minimum SDK.
+- NVIDIA/CUDA/TensorRT versions must be tested together on the actual demo PC.
+- Internet access is not needed during the demo after model artifacts are prepared.

@@ -1,0 +1,56 @@
+# Architecture Decision Records — AUR/S
+
+## AI Maintenance Context
+
+**Purpose:** Records decision rationale so later implementation does not reopen settled choices accidentally.  
+**Current stage:** Stage 0 — ADR-001 through ADR-006 are planning decisions; ADR-007 awaits benchmark evidence.  
+**Update this file when:** a meaningful decision is made, reversed, or validated/refuted by measurement. Never rewrite a historical decision; append a superseding ADR.
+
+## ADR-001: One Local Inference PC
+
+**Status:** Accepted  
+**Decision:** Use the RTX 4060 PC as the only live inference server; retain any other machine only as a fallback.  
+**Why:** Splitting a single feed adds coordination and identity instability without helping the MVP.  
+**Consequence:** Performance tuning happens on one known target machine.
+
+## ADR-002: Native Android Kotlin
+
+**Status:** Accepted  
+**Decision:** Build an Android-only native Kotlin client with CameraX and Compose.  
+**Why:** Camera frames, low-latency rendering, audio, haptics, and lifecycle control are core work.  
+**Consequence:** No cross-platform client in MVP.
+
+## ADR-003: WebSocket JPEG Metadata Pipeline
+
+**Status:** Accepted  
+**Decision:** Send reduced JPEG frames to the PC over WebSocket; return metadata, not processed video.  
+**Why:** It is the smallest LAN transport that proves the experience.  
+**Consequence:** WebRTC is deferred until actual measurements show this path cannot meet latency targets.
+
+## ADR-004: Latest Frame Wins
+
+**Status:** Accepted  
+**Decision:** Every pipeline boundary has a maximum effective queue size of one.  
+**Why:** A current lower-FPS overlay is better than a smooth delayed one.  
+**Consequence:** Dropped frames are normal and must not be treated as errors.
+
+## ADR-005: Segmentation Before Pose
+
+**Status:** Accepted  
+**Decision:** Use person segmentation/tracking; do not include pose in MVP.  
+**Why:** Auras need rough silhouettes; aura values do not depend on body joints.  
+**Consequence:** Add pose only for a concrete post-MVP effect that needs it.
+
+## ADR-006: Aura Is Local Fiction
+
+**Status:** Accepted  
+**Decision:** The server assigns profiles once per temporary track; the phone generates live readings and scans.  
+**Why:** This keeps the effect responsive, deterministic enough for a track, and clearly separate from vision.  
+**Consequence:** There is no server round-trip per displayed digit or scan.
+
+## ADR-007: TensorRT Is a Measured Optimization
+
+**Status:** Pending benchmark  
+**Decision:** First validate a supported PyTorch YOLO segmentation baseline, then export the benchmark winner to a fixed-shape FP16 TensorRT engine if required.  
+**Why:** Correctness and real end-to-end latency determine model choice, not nominal GPU utilization.  
+**Consequence:** Model artifact/version and benchmark outcome must be recorded before release.
