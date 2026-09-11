@@ -3,7 +3,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Defines the evidence required before claiming a slice or release works.  
-**Current stage:** Server protocol and vision-adapter tests pass locally; the Android overlay baseline compiles and is installed. Physical walking-person and alignment acceptance are pending.
+**Current stage:** Server protocol and vision-adapter tests pass locally; the Android overlay and selection slice compile, install, and have passed a physical portrait tap check. Landscape and aura acceptance remain.
 **Update this file when:** a requirement changes, a defect reveals a missing case, a test fixture is added, or release evidence is measured. Do not mark a case passed without executable or manual-test evidence.
 
 ## 1. Test Principles
@@ -52,6 +52,7 @@ Network prerequisite: run the transport test on a direct private hotspot as well
 | Latest-frame transport | Passed for private hotspot | Phone camera opens and reaches the PC over the Windows hotspot; malformed full-resolution frames are prevented by client-side downsampling. |
 | Vision | Metadata loop passed; person-track acceptance pending | Phone received `LINK: OK` after the final shared-viewport/crop/rotation path and reached `FRAME: 27` with a 350 ms round trip, without a camera-process crash or CameraX viewport-mismatch warning. The earlier un-cropped smoke observation was `FRAME: 17` at 315 ms. These are not performance results. Walk one person in view and record stable ID, normalized box/contour, and inference time. |
 | Overlay | Baseline built and installed; manual acceptance pending | Phone binds preview and analysis to one CameraX viewport, transmits the matching cropped/upright image, and uses a source-to-preview transform with that same rotation for the Canvas overlay. Verify a person box follows the preview in portrait, then rotate to landscape and check again. |
+| Selection | Implemented; portrait tap check passed | The phone selected `#565` from a tap at `(500, 900)` and displayed `SELECTED: #565`; verify switching subjects and expiry cleanup during a walking-person run. |
 
 ## 4. Performance Measurement
 

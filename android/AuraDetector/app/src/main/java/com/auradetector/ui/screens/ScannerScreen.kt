@@ -27,6 +27,7 @@ import androidx.camera.view.transform.OutputTransform
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,12 +43,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect as ComposeRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -55,6 +58,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
@@ -100,6 +104,12 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
     val transport = remember(config) { AuraWebSocket(config) }
     val status by transport.status.collectAsState()
     val frameState by transport.frameState.collectAsState()
+    var selectedSubjectId by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(frameState) {
+        if (selectedSubjectId != null && frameState?.subjects?.none { it.id == selectedSubjectId } != false) {
+            selectedSubjectId = null
+        }
+    }
     DisposableEffect(transport) {
         transport.connect()
         onDispose { transport.close() }
@@ -107,8 +117,12 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
 
     Box(modifier = Modifier.fillMaxSize()) {
         CameraTransportPreview(transport)
-        SubjectOverlay(frameState)
-        ScannerHud(status = status, onExit = onExit)
+        SubjectOverlay(
+            frameState = frameState,
+            selectedSubjectId = selectedSubjectId,
+            onSelectSubject = { selectedSubjectId = it }
+        )
+        ScannerHud(status = status, selectedSubjectId = selectedSubjectId, onExit = onExit)
     }
     BackHandler(onBack = onExit)
 }
@@ -209,8 +223,17 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
 }
 
 @Composable
-private fun SubjectOverlay(frameState: VisionFrameState?) {
-    if (frameState == null || frameState.subjects.isEmpty()) return
+private fun SubjectOverlay(
+    frameState: VisionFrameState?,
+    selectedSubjectId: Long?,
+    onSelectSubject: (Long?) -> Unit
+) {
+    val projectedSubjects = remember(frameState) {
+        frameState?.let(::projectSubjects).orEmpty()
+    }
+    val latestSubjects = rememberUpdatedState(projectedSubjects)
+    val latestSelectionHandler = rememberUpdatedState(onSelectSubject)
+    if (projectedSubjects.isEmpty()) return
 
     val labelPaint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -218,33 +241,28 @@ private fun SubjectOverlay(frameState: VisionFrameState?) {
         }
     }
 
-    Canvas(modifier = Modifier.fillMaxSize()) {
+    Canvas(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures { point ->
+                    val hit = latestSubjects.value
+                        .asReversed()
+                        .firstOrNull { it.contains(point) }
+                    latestSelectionHandler.value(hit?.subject?.id)
+                }
+            }
+    ) {
         val strokeWidth = 3.dp.toPx()
-
-        fun project(point: VisionPoint): Offset {
-            val sourceX = point.x * frameState.sourceWidth
-            val sourceY = point.y * frameState.sourceHeight
-            val transform = frameState.sourceToPreview
-            val denominator = transform[6] * sourceX + transform[7] * sourceY + transform[8]
-            return Offset(
-                (transform[0] * sourceX + transform[1] * sourceY + transform[2]) / denominator,
-                (transform[3] * sourceX + transform[4] * sourceY + transform[5]) / denominator
-            )
-        }
-
-        frameState.subjects.forEach { subject ->
-            val boxCorners = listOf(
-                VisionPoint(subject.x, subject.y),
-                VisionPoint(subject.x + subject.width, subject.y),
-                VisionPoint(subject.x + subject.width, subject.y + subject.height),
-                VisionPoint(subject.x, subject.y + subject.height)
-            ).map(::project)
-            val left = boxCorners.minOf { it.x }
-            val top = boxCorners.minOf { it.y }
-            val right = boxCorners.maxOf { it.x }
-            val bottom = boxCorners.maxOf { it.y }
-            val color = CyanAccent
-            val contour = subject.contour.map(::project)
+        projectedSubjects.forEach { projected ->
+            val subject = projected.subject
+            val left = projected.box.left
+            val top = projected.box.top
+            val right = projected.box.right
+            val bottom = projected.box.bottom
+            val selected = subject.id == selectedSubjectId
+            val color = if (selected) NeonGreen else CyanAccent
+            val contour = projected.contour
 
             if (contour.size >= 3) {
                 val path = Path().apply {
@@ -270,6 +288,16 @@ private fun SubjectOverlay(frameState: VisionFrameState?) {
                 )
             }
 
+            if (selected) {
+                drawRoundRect(
+                    color = NeonGreen,
+                    topLeft = Offset(left, top),
+                    size = Size(right - left, bottom - top),
+                    cornerRadius = CornerRadius(16.dp.toPx()),
+                    style = Stroke(strokeWidth * 1.5f)
+                )
+            }
+
             drawIntoCanvas { canvas ->
                 labelPaint.color = color.toArgb()
                 labelPaint.textSize = 14.dp.toPx()
@@ -282,6 +310,62 @@ private fun SubjectOverlay(frameState: VisionFrameState?) {
             }
         }
     }
+}
+
+private data class ProjectedSubject(
+    val subject: com.auradetector.transport.VisionSubject,
+    val box: ComposeRect,
+    val contour: List<Offset>
+) {
+    fun contains(point: Offset): Boolean =
+        if (contour.size >= 3) pointInPolygon(point, contour) else box.contains(point)
+}
+
+private fun projectSubjects(frameState: VisionFrameState): List<ProjectedSubject> {
+    fun project(point: VisionPoint): Offset {
+        val sourceX = point.x * frameState.sourceWidth
+        val sourceY = point.y * frameState.sourceHeight
+        val transform = frameState.sourceToPreview
+        val denominator = transform[6] * sourceX + transform[7] * sourceY + transform[8]
+        return Offset(
+            (transform[0] * sourceX + transform[1] * sourceY + transform[2]) / denominator,
+            (transform[3] * sourceX + transform[4] * sourceY + transform[5]) / denominator
+        )
+    }
+
+    return frameState.subjects.map { subject ->
+        val boxCorners = listOf(
+            VisionPoint(subject.x, subject.y),
+            VisionPoint(subject.x + subject.width, subject.y),
+            VisionPoint(subject.x + subject.width, subject.y + subject.height),
+            VisionPoint(subject.x, subject.y + subject.height)
+        ).map(::project)
+        val box = ComposeRect(
+            left = boxCorners.minOf { it.x },
+            top = boxCorners.minOf { it.y },
+            right = boxCorners.maxOf { it.x },
+            bottom = boxCorners.maxOf { it.y }
+        )
+        ProjectedSubject(subject, box, subject.contour.map(::project))
+    }
+}
+
+private fun pointInPolygon(point: Offset, polygon: List<Offset>): Boolean {
+    var inside = false
+    var previous = polygon.lastIndex
+    for (index in polygon.indices) {
+        val currentPoint = polygon[index]
+        val previousPoint = polygon[previous]
+        val crosses = (currentPoint.y > point.y) != (previousPoint.y > point.y)
+        if (crosses) {
+            val intersectionX =
+                (previousPoint.x - currentPoint.x) * (point.y - currentPoint.y) /
+                    (previousPoint.y - currentPoint.y) + currentPoint.x
+            if (point.x < intersectionX) inside = !inside
+        }
+        previous = index
+    }
+    return inside
 }
 
 private fun ImageProxy.sourceToPreviewMatrix(
@@ -298,7 +382,7 @@ private fun ImageProxy.sourceToPreviewMatrix(
 }
 
 @Composable
-private fun ScannerHud(status: TransportStatus, onExit: () -> Unit) {
+private fun ScannerHud(status: TransportStatus, selectedSubjectId: Long?, onExit: () -> Unit) {
     val color = when (status.state) {
         VisionLinkState.READY -> NeonGreen
         VisionLinkState.CONNECTING -> OrangeWarning
@@ -309,6 +393,7 @@ private fun ScannerHud(status: TransportStatus, onExit: () -> Unit) {
         append(status.detail)
         status.lastFrameId?.let { append("  FRAME: $it") }
         status.latencyMs?.let { append("  ${it}ms") }
+        selectedSubjectId?.let { append("  SELECTED: #$it") }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {

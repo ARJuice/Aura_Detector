@@ -1,7 +1,7 @@
 # Aura Detector — Internal Build Guide
 
 **Audience:** AI agents and implementers.  
-**Current stage:** Step 5 — the Android subject-overlay baseline is implemented and installed; physical alignment and tap selection are next.
+**Current stage:** Step 6 — the Android subject-overlay baseline and tap selection are implemented and installed; stable aura profiles/live readings are next.
 **Purpose:** Turns the product/technical documents into the safest next execution order.  
 **Update this file when:** a phase starts or finishes, an actual command/setup differs, a benchmark changes the recommended model/configuration, or a discovered constraint changes the build order. Do not claim a phase is complete without its stated definition-of-done evidence.
 
@@ -155,7 +155,7 @@ Use one custom Canvas layer for all per-frame drawing. Keep Compose out of the h
 
 - `AuraWebSocket` parses up to six current `frame_state.subjects` with normalized boxes and optional simplified contours, retaining each acknowledged frame's cropped, upright source size and CameraX source-to-preview transform.
 - `ScannerScreen` binds preview and analysis in one CameraX `UseCaseGroup` using `PreviewView.viewPort`, transmits that same crop after rotation, and configures the per-frame CameraX transform with that rotation before projecting response coordinates into `PreviewView` for the Canvas outline/contour and `SUBJECT #id` label.
-- The debug APK compiles and is installed. A physical walking-person alignment check is still required before selection is added.
+- The debug APK compiles and is installed. A portrait walking-person run confirmed live tracking and a tap at `(500, 900)` selected `SUBJECT #565`; landscape and expiry edge-case checks remain.
 
 Implement coordinate mapping once. The server frame and PreviewView may have different aspect ratios or rotation; map normalized source coordinates through the exact preview crop/rotation transform before drawing or hit-testing. Test portrait and landscape before spending time on effects.
 
@@ -169,7 +169,7 @@ Selection behavior:
 ### Definition of done
 
 - Taps select the person the user touched in portrait mode.
-- Switching selection removes the previous numeric reading.
+- Switching selection updates the sole highlighted subject and removes the previous selection state.
 - The UI explicitly shows `LINK: OK`, `DEGRADED`, or `OFFLINE`; it never treats stale data as live.
 
 ## 6. Add Deterministic Aura Profiles

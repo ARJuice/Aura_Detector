@@ -6,7 +6,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Defines the intended technical shape so implementation choices remain compatible end to end.  
-**Current stage:** Step 5 Android overlay baseline is implemented and installed. Physical walking-person alignment validation, selection, and aura interactions are not complete. The PyTorch `yolo26n-seg.pt` baseline is selected; TensorRT remains deferred pending measurement.
+**Current stage:** Step 6 Android overlay and selection are implemented and installed. Portrait tracking and a physical tap selection are confirmed; landscape and aura interactions remain. The PyTorch `yolo26n-seg.pt` baseline is selected; TensorRT remains deferred pending measurement.
 **Update this file when:** the actual architecture, owned state, dependencies, deployment shape, configuration, or failure behavior differs from this design. Record measured facts, not guesses.
 
 ## 1. Architecture
@@ -82,6 +82,7 @@ Start with `yolo26n-seg.pt`: the nano instance-segmentation checkpoint is the fa
 - The debug APK has been installed and the camera preview works over a private Windows hotspot; the college captive-portal network is not a supported transport network.
 - The physical phone now receives `frame_state` acknowledgements from the YOLO server over the hotspot. The final shared-viewport/crop/rotation path reached `FRAME: 27` at 350 ms without a camera-process crash or CameraX viewport-mismatch warning; an earlier un-cropped path reached `FRAME: 17` at 315 ms. Both are smoke-test observations, not p50/p95 performance results.
 - Android binds preview and analysis through one CameraX `UseCaseGroup`/`PreviewView` viewport, encodes the analysis crop after applying its rotation, and applies that same rotation in CameraX's per-frame source-to-`PreviewView` transform before rendering normalized boxes/contours into a Canvas overlay. It renders a temporary `SUBJECT #id` label; physical alignment is still unmeasured.
+- Android projects the same geometry used for drawing into contour/box hit regions; a tap selects one track, highlights its outline, shows `SELECTED: #id`, and clears selection when the current frame no longer contains that ID.
 
 ## 5. Data Boundaries
 
