@@ -63,20 +63,17 @@ fun SettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(DarkNavy)
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "AUR/S",
-            style = MaterialTheme.typography.displayLarge,
-            color = NeonGreen,
-            modifier = Modifier.padding(top = 32.dp)
-        )
-        Text(
             text = "AURA RADIATION MONITOR",
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
             color = CyanAccent,
-            modifier = Modifier.padding(bottom = 48.dp)
+            modifier = Modifier.padding(top = 16.dp, bottom = 32.dp)
         )
         
         OutlinedTextField(
