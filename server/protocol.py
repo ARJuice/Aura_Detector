@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Literal, Optional
 import base64
 from pydantic import BaseModel, field_validator, model_validator
 
@@ -27,7 +27,7 @@ def validate_frame_dimensions(width: int, height: int, jpeg_size: int):
         raise ValueError("JPEG size exceeds maximum allowed (2MB)")
 
 class Hello(BaseModel):
-    type: str = "hello"
+    type: Literal["hello"] = "hello"
     version: int
     token: str
     clientId: str
@@ -43,7 +43,7 @@ class Hello(BaseModel):
         return validate_token(v)
 
 class HelloAck(BaseModel):
-    type: str = "hello_ack"
+    type: Literal["hello_ack"] = "hello_ack"
     version: int = 1
     sessionId: str
     maxSubjects: int = 6
@@ -63,7 +63,7 @@ class Subject(BaseModel):
     profile: Optional[Profile] = None
 
 class Frame(BaseModel):
-    type: str = "frame"
+    type: Literal["frame"] = "frame"
     version: int = 1
     frameId: int
     capturedAtMs: int
@@ -79,14 +79,14 @@ class Frame(BaseModel):
     @model_validator(mode="after")
     def check_dimensions(self):
         try:
-            jpeg_bytes = base64.b64decode(self.jpeg)
+            jpeg_bytes = base64.b64decode(self.jpeg, validate=True)
             validate_frame_dimensions(self.width, self.height, len(jpeg_bytes))
         except Exception as e:
             raise ValueError(f"Invalid frame: {str(e)}")
         return self
 
 class FrameState(BaseModel):
-    type: str = "frame_state"
+    type: Literal["frame_state"] = "frame_state"
     version: int = 1
     frameId: int
     serverReceivedAtMs: int
@@ -94,7 +94,7 @@ class FrameState(BaseModel):
     subjects: List[Subject]
 
 class ErrorMsg(BaseModel):
-    type: str = "error"
+    type: Literal["error"] = "error"
     version: int = 1
     code: str
     message: str

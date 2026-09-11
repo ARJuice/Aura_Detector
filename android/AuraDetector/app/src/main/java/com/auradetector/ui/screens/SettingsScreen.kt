@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +42,7 @@ fun SettingsScreen(
     
     var host by remember(initialConfig) { mutableStateOf(initialConfig.host) }
     var portString by remember(initialConfig) { mutableStateOf(initialConfig.port.toString()) }
+    var token by remember(initialConfig) { mutableStateOf(initialConfig.token) }
     var status by remember { mutableStateOf(ConnectionStatus.IDLE) }
     var errorMessage by remember { mutableStateOf("") }
     val coroutineScope = rememberCoroutineScope()
@@ -52,7 +54,7 @@ fun SettingsScreen(
             .build()
     }
 
-    val currentConfig = ServerConfig(host, portString.toIntOrNull() ?: 8765)
+    val currentConfig = ServerConfig(host, portString.toIntOrNull() ?: 8765, token)
 
     Column(
         modifier = Modifier
@@ -81,7 +83,25 @@ fun SettingsScreen(
             textStyle = MaterialTheme.typography.bodyLarge,
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
-            colors = TextFieldDefaults.outlinedTextFieldColors(
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = NeonGreen,
+                unfocusedBorderColor = CyanAccent,
+                focusedLabelColor = NeonGreen,
+                unfocusedLabelColor = CyanAccent,
+                cursorColor = NeonGreen
+            )
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedTextField(
+            value = token,
+            onValueChange = { token = it },
+            label = { Text("SESSION TOKEN") },
+            textStyle = MaterialTheme.typography.bodyLarge,
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = NeonGreen,
                 unfocusedBorderColor = CyanAccent,
                 focusedLabelColor = NeonGreen,
@@ -100,7 +120,7 @@ fun SettingsScreen(
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth(),
-            colors = TextFieldDefaults.outlinedTextFieldColors(
+            colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = NeonGreen,
                 unfocusedBorderColor = CyanAccent,
                 focusedLabelColor = NeonGreen,
@@ -117,6 +137,7 @@ fun SettingsScreen(
                 errorMessage = ""
                 coroutineScope.launch {
                     try {
+                        require(currentConfig.isValid) { "Enter a server IP, valid port, and session token" }
                         val request = Request.Builder()
                             .url(currentConfig.healthUrl)
                             .build()

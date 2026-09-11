@@ -7,7 +7,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Prevents Android and server work from inventing incompatible assumptions.  
-**Current stage:** Stage 0 — this is a proposed v1 contract; no endpoint or client exists.  
+**Current stage:** The v1 endpoint and Android client source exist; manual LAN validation is pending.
 **Update this file when:** before implementing a message, after a contract correction, or before any backward-incompatible change. Keep a compatibility note rather than silently changing established fields.
 
 ## 1. Session Flow
@@ -77,7 +77,7 @@ client connects → hello → hello_ack → frame* → frame_state* → close
 {"type":"error","version":1,"code":"invalid_frame","message":"JPEG could not be decoded","recoverable":true}
 ```
 
-Known error codes: `unauthorized`, `unsupported_version`, `invalid_message`, `invalid_frame`, `server_unavailable`, `rate_limited`.
+Known error codes: `UNAUTHORIZED`, `UNSUPPORTED_VERSION`, `INVALID_MESSAGE`, `INVALID_FRAME`, `SERVER_UNAVAILABLE`, `RATE_LIMITED`.
 
 ## 3. Validation and Limits
 

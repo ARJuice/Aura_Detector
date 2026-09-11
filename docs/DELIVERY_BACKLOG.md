@@ -3,15 +3,15 @@
 ## AI Maintenance Context
 
 **Purpose:** Tells the AI the next permitted implementation step and the evidence that closes it.  
-**Current stage:** Stage 0 is complete only as documentation; all build slices remain not started.  
+**Current stage:** Build Guide Step 3 transport is implemented, compiles, and has been camera-validated over a private Windows hotspot. Vision and all later slices remain not started.
 **Update this file when:** starting a slice, completing its definition of done, splitting a proven-too-large slice, or adding a user-approved scope item. Preserve completed slices as history.
 
 Build each slice to its acceptance condition before starting the next one. This is an ordered backlog, not a promise of calendar dates.
 
 | Slice | Outcome | Requirement links | Done when |
 |---|---|---|---|
-| 0. Environment | Phone and PC can talk on the private LAN. | NFR-06 | Health endpoint opens from phone; Android shell installs. |
-| 1. Transport | Latest JPEG/ack loop with frame ordering. | FR-02, FR-03 | Echoed frame IDs show no old-response backlog. |
+| 0. Environment | Phone and PC can talk on the private LAN. | NFR-06 | Source exists; manually verify health endpoint opens from phone and Android shell installs. |
+| 1. Transport | Latest JPEG/ack loop with frame ordering. | FR-02, FR-03 | Debug APK installs and camera reaches the PC over the private hotspot; continue observing frame IDs as the vision pipeline is added. |
 | 2. Vision | PC returns up to six person track boxes. | FR-04, FR-11 | Real walking subject gets a temporary ID; malformed input recovers. |
 | 3. Overlay | Phone draws aligned labels/boxes and status. | FR-01, FR-02 | Portrait/landscape coordinate mapping and stale state work. |
 | 4. Selection | One tapped subject is active. | FR-06, FR-07 | Hit-test picks intended subject and clears expiry. |

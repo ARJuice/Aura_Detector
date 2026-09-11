@@ -33,6 +33,10 @@ Do not log raw frames, contours tied to persistent names, device identifiers, or
 - Limit one active client for the MVP.
 - Show visible camera and connection state in the app.
 
+### Captive-portal and peer-isolation rule
+
+Do not use a college/public Wi-Fi network for the live scanner. A captive portal can redirect the app's local HTTP health request to a login gateway such as `172.16.16.16:8090`, and venue Wi-Fi may prevent phone-to-PC peer traffic. Use a direct phone hotspot or a private PC hotspot instead; internet access is not required.
+
 ## 4. Threats and Responses
 
 | Threat | Response |

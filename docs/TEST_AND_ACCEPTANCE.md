@@ -3,7 +3,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Defines the evidence required before claiming a slice or release works.  
-**Current stage:** Stage 0 — acceptance cases are planned only; no test has run and no result is recorded.  
+**Current stage:** Server protocol/unit tests are present in source; this turn could not run them because no usable Python launcher is installed. Android device acceptance is also pending.
 **Update this file when:** a requirement changes, a defect reveals a missing case, a test fixture is added, or release evidence is measured. Do not mark a case passed without executable or manual-test evidence.
 
 ## 1. Test Principles
@@ -39,6 +39,18 @@
 | AT-10 | Invalid frame/message | Server returns recoverable error and remains available. |
 | AT-11 | Portrait/landscape | Overlay and touch mapping align with preview crop/rotation. |
 | AT-12 | Soak | No crash, severe thermal issue, memory growth, or latency backlog. |
+
+Network prerequisite: run the transport test on a direct private hotspot as well as the intended demo network. A captive-portal redirect or client-isolation failure is a network setup failure, not an application response.
+
+## 3.1 Current Verification Status
+
+| Check | Status | Evidence needed next |
+|---|---|---|
+| Server protocol tests | Blocked locally | Install/configure Python, then run `python -m pytest server/tests -q`. |
+| Android compilation | Passed | `gradle :app:assembleDebug` completed successfully after fixing project configuration and Kotlin/Compose errors. |
+| Android installation | Passed | Debug APK installs on the authorized phone. |
+| Latest-frame transport | Passed for private hotspot | Phone camera opens and reaches the PC over the Windows hotspot; keep checking frame IDs/latency as vision is added. |
+| Vision | Not started | Do not begin until transport acceptance passes. |
 
 ## 4. Performance Measurement
 

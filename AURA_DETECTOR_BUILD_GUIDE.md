@@ -1,7 +1,7 @@
 # Aura Detector — Internal Build Guide
 
 **Audience:** AI agents and implementers.  
-**Current stage:** Stage 0 — planning complete, implementation not started.  
+**Current stage:** Step 3 — transport implementation is installed and camera-validated over a private Windows hotspot.
 **Purpose:** Turns the product/technical documents into the safest next execution order.  
 **Update this file when:** a phase starts or finishes, an actual command/setup differs, a benchmark changes the recommended model/configuration, or a discovered constraint changes the build order. Do not claim a phase is complete without its stated definition-of-done evidence.
 
@@ -26,6 +26,7 @@ Keep these out of the MVP: face recognition, pose, custom training, WebRTC, clou
 - Install a supported NVIDIA driver, Python 3.11, and a CUDA-enabled PyTorch build.
 - Create a Python virtual environment in `server/.venv`; keep dependencies in `server/requirements.txt`.
 - Connect the PC and Android device to the same dedicated 5 GHz / Wi-Fi 6 network if possible. Disable VPNs during testing.
+- Do not use captive-portal or client-isolated college/public Wi-Fi for the live link. Use a direct phone/PC hotspot so the phone can reach the PC without a login redirect.
 - Reserve or note the PC's LAN IP. Test it from the phone browser before building the Android client.
 - Allow the chosen local TCP port through Windows Firewall only on Private networks.
 

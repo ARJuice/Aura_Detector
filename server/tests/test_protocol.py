@@ -35,6 +35,10 @@ def test_frame_invalid_size():
     with pytest.raises(ValidationError):
         Frame(frameId=1, capturedAtMs=1000, width=640, height=480, jpeg=big_jpeg)
 
+def test_frame_invalid_base64():
+    with pytest.raises(ValidationError):
+        Frame(frameId=1, capturedAtMs=1000, width=640, height=480, jpeg="not-base64!")
+
 def test_frame_state_serialization():
     fs = FrameState(
         frameId=1,

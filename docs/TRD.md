@@ -6,7 +6,7 @@
 ## AI Maintenance Context
 
 **Purpose:** Defines the intended technical shape so implementation choices remain compatible end to end.  
-**Current stage:** Stage 0 — this is a design baseline, not a description of running software. The model checkpoint and TensorRT engine are intentionally unselected pending measurement.  
+**Current stage:** Transport source exists but has not been physically validated. The model checkpoint and TensorRT engine are intentionally unselected pending measurement.
 **Update this file when:** the actual architecture, owned state, dependencies, deployment shape, configuration, or failure behavior differs from this design. Record measured facts, not guesses.
 
 ## 1. Architecture
@@ -70,6 +70,14 @@ Final model checkpoint selection is **decision pending** until the target hardwa
 - Server: one replaceable newest decoded frame awaiting inference.
 - Client renderer: accept only a `frame_state` newer than its last accepted `frameId`.
 
+### Current implementation evidence
+
+- Android source requests camera permission, configures CameraX `STRATEGY_KEEP_ONLY_LATEST`, JPEG-encodes YUV frames, caps sends at 15 FPS, and allows one outstanding frame.
+- Android source sends v1 `hello`/`frame` messages, stores the session token locally, and displays hello/frame-state link status and round-trip latency.
+- Python source accepts the v1 endpoint, validates hello/token/frame ordering, and returns a `frame_state` from the current stub pipeline.
+- `gradle :app:assembleDebug` has now passed on the development machine.
+- The debug APK has been installed and the camera preview works over a private Windows hotspot; the college captive-portal network is not a supported transport network.
+
 ## 5. Data Boundaries
 
 - Source image pixels exist only in transit and working memory; no frame persistence.
@@ -104,7 +112,7 @@ Configuration is local development configuration, not a remote-admin feature.
 
 ## 8. Dependencies and Constraints
 
-- Both devices must share a private local network.
+- Both devices must share a private local network that permits peer-to-peer traffic; captive-portal/public Wi-Fi is not supported.
 - The target Android device must support CameraX and the selected minimum SDK.
 - NVIDIA/CUDA/TensorRT versions must be tested together on the actual demo PC.
 - Internet access is not needed during the demo after model artifacts are prepared.

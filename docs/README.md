@@ -1,9 +1,9 @@
 # Aura Detector Internal Documentation
 
 **Audience:** AI agents and project implementers. This folder is not public-facing project copy.  
-**Current project stage:** Stage 0 — planning complete; no application code, Android project, server, model artifact, benchmark, or deployment exists yet.  
-**What has been done:** product scope, architecture, protocol contract, UX behavior, acceptance plan, security boundaries, delivery order, and initial decisions are documented.  
-**What happens next:** begin only with Delivery Slice 0 in [DELIVERY_BACKLOG.md](DELIVERY_BACKLOG.md); update the named documents as each slice is implemented and verified.
+**Current project stage:** Build Guide Step 3 — transport is physically validated on a private Windows hotspot.
+**What has been done:** planning documents, Android settings shell, server health/protocol scaffold, latest-frame camera/WebSocket transport, successful debug build/install, and a working camera preview now exist.
+**What happens next:** begin person detection/tracking; keep the private hotspot as the known-good network fallback.
 
 This folder is the source of truth before implementation begins. All documents describe the **MVP** unless a section explicitly says post-MVP.
 
@@ -35,9 +35,9 @@ Related project material:
 
 | Stage | Status | Evidence / documentation to update |
 |---|---|---|
-| 0. Planning | Complete | This documentation set exists; no executable artifact exists. |
-| 1. Environment | Not started | Record actual SDK, Python/CUDA, device, and LAN setup in TRD and operations. |
-| 2. Transport | Not started | Implement and verify the v1 protocol; update protocol if reality requires a compatible correction. |
+| 0. Planning | Complete | Product, architecture, protocol, UX, test, operations, backlog, and decisions are documented. |
+| 1. Environment / structure | Source exists; manual verification pending | Android settings shell and Python server scaffold exist. Record actual SDK, Python/CUDA, device, and LAN setup in TRD and operations. |
+| 2. Transport | Source complete; manual verification pending | Camera latest-frame JPEG sender, v1 hello/ack, token entry, frame ordering, and status HUD exist. Validate on real hardware. |
 | 3. Vision and overlay | Not started | Record selected model, benchmark, coordinate behavior, and acceptance evidence. |
 | 4. Aura interaction | Not started | Record implemented scan/value behavior and UX changes. |
 | 5. Performance and release | Not started | Record measured p50/p95, fallback configuration, demo evidence, and release readiness. |
