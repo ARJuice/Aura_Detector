@@ -242,7 +242,13 @@ private fun SubjectOverlay(frameState: VisionFrameState?) {
             val right = boxCorners.maxOf { it.x }
             val bottom = boxCorners.maxOf { it.y }
             val color = CyanAccent
-            val contour = subject.contour.map(::project)
+            // The YOLO mask contour reaches this renderer a quarter-turn left of the
+            // correctly aligned person box. Rotate only its rendered shape clockwise;
+            // the CameraX source-to-preview mapping and box position stay unchanged.
+            val contourCenter = Offset((left + right) / 2f, (top + bottom) / 2f)
+            val contour = subject.contour.map(::project).map { point ->
+                point.rotateClockwiseAround(contourCenter)
+            }
 
             if (contour.size >= 3) {
                 val path = Path().apply {
@@ -281,6 +287,11 @@ private fun SubjectOverlay(frameState: VisionFrameState?) {
         }
     }
 }
+
+private fun Offset.rotateClockwiseAround(center: Offset): Offset = Offset(
+    center.x + (y - center.y),
+    center.y - (x - center.x)
+)
 
 private fun ImageProxy.sourceToPreviewMatrix(
     previewOutput: OutputTransform?,

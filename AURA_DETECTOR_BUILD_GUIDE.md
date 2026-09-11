@@ -155,6 +155,7 @@ Use one custom Canvas layer for all per-frame drawing. Keep Compose out of the h
 
 - `AuraWebSocket` parses up to six current `frame_state.subjects` with normalized boxes and optional simplified contours, retaining each acknowledged frame's cropped, upright source size and CameraX source-to-preview transform.
 - `ScannerScreen` binds preview and analysis in one CameraX `UseCaseGroup` using `PreviewView.viewPort`, transmits that same crop after rotation, then projects its coordinates through the exact per-frame `ImageProxy`-to-`PreviewView` transform before drawing the Canvas outline/contour and `SUBJECT #id` label.
+- The box mapping is retained unchanged. A display-space 90-degree clockwise contour calibration around that box's projected centre corrects the observed left-tilted segmentation silhouette without shifting the detected person.
 - The debug APK compiles and is installed. A physical walking-person alignment check is still required before selection is added.
 
 Implement coordinate mapping once. The server frame and PreviewView may have different aspect ratios or rotation; map normalized source coordinates through the exact preview crop/rotation transform before drawing or hit-testing. Test portrait and landscape before spending time on effects.
