@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -63,6 +64,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Observer
 import com.auradetector.data.ServerConfig
@@ -205,6 +207,12 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
             status = status,
             selectedSubjectId = selectedSubjectId,
             liveReading = liveReading,
+            scanStatus = when {
+                scanningSubjectId != null && scanResult == null ->
+                    "SCANNING #${scanningSubjectId} ${(scanProgress * 100).toInt()}%"
+                scanResult != null -> "SCAN READY #${scanningSubjectId}"
+                else -> null
+            },
             onExit = onExit
         )
     }
@@ -401,17 +409,21 @@ private fun SubjectOverlay(
             drawIntoCanvas { canvas ->
                 labelPaint.color = color.toArgb()
                 labelPaint.textSize = 14.dp.toPx()
+                val labelX = (left + strokeWidth).coerceIn(0f, (size.width - labelPaint.textSize).coerceAtLeast(0f))
+                val labelY = (top + labelPaint.textSize + strokeWidth)
+                    .coerceIn(labelPaint.textSize, (size.height - labelPaint.textSize * 2f).coerceAtLeast(labelPaint.textSize))
                 canvas.nativeCanvas.drawText(
                     "SUBJECT #${subject.id}",
-                    left + strokeWidth,
-                    (top - strokeWidth).coerceAtLeast(labelPaint.textSize),
+                    labelX,
+                    labelY,
                     labelPaint
                 )
                 if (selected && liveReading != null) {
                     canvas.nativeCanvas.drawText(
                         liveReading,
-                        left + strokeWidth,
-                        (top - strokeWidth).coerceAtLeast(labelPaint.textSize) + labelPaint.textSize + 4.dp.toPx(),
+                        labelX,
+                        (labelY + labelPaint.textSize + 4.dp.toPx())
+                            .coerceAtMost(size.height - 2.dp.toPx()),
                         labelPaint
                     )
                 }
@@ -540,11 +552,15 @@ private class AuraScanGenerator(subjectId: Long) {
 private fun ScanOverlay(subjectId: Long?, progress: Float, result: AuraScanResult?) {
     if (subjectId == null) return
     Box(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(top = 180.dp, bottom = 190.dp)
+            .zIndex(10f),
         contentAlignment = Alignment.Center
     ) {
         Column(
             modifier = Modifier
+                .fillMaxWidth()
                 .padding(24.dp)
                 .background(DarkNavy.copy(alpha = 0.94f))
                 .border(2.dp, if (result == null) OrangeWarning else NeonGreen)
@@ -555,6 +571,19 @@ private fun ScanOverlay(subjectId: Long?, progress: Float, result: AuraScanResul
             if (result == null) {
                 Text("SCANNING SUBJECT #$subjectId", color = OrangeWarning)
                 Text("CALIBRATING ${(progress * 100).toInt()}%", color = CyanAccent)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .background(CyanAccent.copy(alpha = 0.18f))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(progress.coerceIn(0f, 1f))
+                            .height(8.dp)
+                            .background(OrangeWarning)
+                    )
+                }
                 Text("NEGOTIATING WITH THE FIELD", color = CyanAccent)
             } else {
                 Text("AURA SCAN COMPLETE", color = NeonGreen)
@@ -619,6 +648,7 @@ private fun ScannerHud(
     status: TransportStatus,
     selectedSubjectId: Long?,
     liveReading: String?,
+    scanStatus: String?,
     onExit: () -> Unit
 ) {
     val color = when (status.state) {
@@ -633,6 +663,7 @@ private fun ScannerHud(
         status.latencyMs?.let { append("  ${it}ms") }
         selectedSubjectId?.let { append("  SELECTED: #$it") }
         liveReading?.let { append("  $it") }
+        scanStatus?.let { append("  $it") }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {

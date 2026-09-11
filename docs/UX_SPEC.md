@@ -48,7 +48,7 @@ Brighter aura, targeting reticle, persistent ID, and a smooth non-negative `AUR/
 
 ### Scanning
 
-Freeze only the scan presentation, never the camera preview. Show `SCANNING SUBJECT NN…`, a progress ring, and fake calibration phrases. Block repeated scan triggers until the current scan finishes.
+Freeze only the scan presentation, never the camera preview. Show a safe-area-centered `SCANNING SUBJECT NN…` card with a visible progress bar and fake calibration phrases. Keep the completed result card centered and block repeated scan triggers until the current scan finishes.
 
 ### Result
 

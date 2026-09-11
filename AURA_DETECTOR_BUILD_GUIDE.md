@@ -191,6 +191,7 @@ Use log-space movement for broad ranges and clamp every finite result to its ban
 - `AuraWebSocket` parses the server's stable `band`, `min`, `max`, and `palette` profile fields without adding per-reading network traffic.
 - `ScannerScreen` owns one bounded `AuraValueGenerator` per selected track, updates the selected value locally every 160 ms, clamps finite bands, and treats `∞` as a named display state.
 - `ScannerScreen` handles selected-subject double-taps with a one-second local scan, deterministic finite/infinity result generator, and a result card containing base, modifier, final, and classification.
+- The scan card is explicitly top-layered in a safe center region with a visible progress bar; subject labels and live readings are clamped inside the preview instead of being drawn above an off-screen box.
 - The APK compiles; the authorized phone is currently disconnected, so live-value and scan behavior still need on-device verification.
 
 ### Definition of done
