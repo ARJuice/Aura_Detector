@@ -51,7 +51,7 @@ Network prerequisite: run the transport test on a direct private hotspot as well
 | Android installation | Passed | Debug APK installs on the authorized phone. |
 | Latest-frame transport | Passed for private hotspot | Phone camera opens and reaches the PC over the Windows hotspot; malformed full-resolution frames are prevented by client-side downsampling. |
 | Vision | Metadata loop passed; person-track acceptance pending | Phone received `LINK: OK` after the final shared-viewport/crop/rotation path and reached `FRAME: 27` with a 350 ms round trip, without a camera-process crash or CameraX viewport-mismatch warning. The earlier un-cropped smoke observation was `FRAME: 17` at 315 ms. These are not performance results. Walk one person in view and record stable ID, normalized box/contour, and inference time. |
-| Overlay | Baseline built and installed; manual acceptance pending | Phone binds preview and analysis to one CameraX viewport, transmits the matching cropped/upright image, and uses the exact source-to-preview transform for the Canvas overlay. Verify a person box follows the preview in portrait, then rotate to landscape and check again. |
+| Overlay | Baseline built and installed; manual acceptance pending | Phone binds preview and analysis to one CameraX viewport, transmits the matching cropped/upright image, and uses a source-to-preview transform with that same rotation for the Canvas overlay. Verify a person box follows the preview in portrait, then rotate to landscape and check again. |
 
 ## 4. Performance Measurement
 

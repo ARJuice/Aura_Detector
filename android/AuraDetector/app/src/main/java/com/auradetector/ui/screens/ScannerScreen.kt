@@ -123,7 +123,9 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
     val imageTransformFactory = remember {
         ImageProxyTransformFactory().apply {
             setUsingCropRect(true)
-            setUsingRotationDegrees(false)
+            // toJpeg applies this same ImageProxy rotation before the server sees pixels.
+            // The returned server coordinates are therefore in the rotated JPEG space.
+            setUsingRotationDegrees(true)
         }
     }
 
