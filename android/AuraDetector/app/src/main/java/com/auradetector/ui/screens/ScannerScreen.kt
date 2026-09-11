@@ -2,6 +2,7 @@ package com.auradetector.ui.screens
 
 import android.Manifest
 import android.content.Context
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.content.pm.PackageManager
@@ -18,6 +19,8 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.camera.view.transform.CoordinateTransform
+import androidx.camera.view.transform.ImageProxyTransformFactory
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -111,6 +114,12 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val previewView = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER } }
     val analyzerExecutor = remember { Executors.newSingleThreadExecutor() }
+    val imageTransformFactory = remember {
+        ImageProxyTransformFactory().apply {
+            setUsingCropRect(false)
+            setUsingRotationDegrees(false)
+        }
+    }
 
     DisposableEffect(lifecycleOwner, transport) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
@@ -126,13 +135,17 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
                 .also { imageAnalysis ->
                     imageAnalysis.setAnalyzer(analyzerExecutor) { image ->
                         try {
-                            val frame = image.toJpeg()
-                            transport.sendFrame(
-                                frame.bytes,
-                                frame.width,
-                                frame.height,
-                                image.imageInfo.rotationDegrees
-                            )
+                            image.sourceToPreviewMatrix(previewView, imageTransformFactory)?.let { transform ->
+                                val frame = image.toJpeg()
+                                transport.sendFrame(
+                                    jpeg = frame.bytes,
+                                    width = frame.width,
+                                    height = frame.height,
+                                    sourceWidth = image.width,
+                                    sourceHeight = image.height,
+                                    sourceToPreview = transform
+                                )
+                            }
                         } finally {
                             image.close()
                         }
@@ -169,21 +182,16 @@ private fun SubjectOverlay(frameState: VisionFrameState?) {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
-        val rotation = ((frameState.rotationDegrees % 360) + 360) % 360
-        val sourceWidth = if (rotation % 180 == 0) frameState.sourceWidth else frameState.sourceHeight
-        val sourceHeight = if (rotation % 180 == 0) frameState.sourceHeight else frameState.sourceWidth
-        val scale = maxOf(size.width / sourceWidth, size.height / sourceHeight)
-        val renderedWidth = sourceWidth * scale
-        val renderedHeight = sourceHeight * scale
-        val offsetX = (size.width - renderedWidth) / 2f
-        val offsetY = (size.height - renderedHeight) / 2f
         val strokeWidth = 3.dp.toPx()
 
         fun project(point: VisionPoint): Offset {
-            val rotated = point.rotate(rotation)
+            val sourceX = point.x * frameState.sourceWidth
+            val sourceY = point.y * frameState.sourceHeight
+            val transform = frameState.sourceToPreview
+            val denominator = transform[6] * sourceX + transform[7] * sourceY + transform[8]
             return Offset(
-                offsetX + rotated.x * renderedWidth,
-                offsetY + rotated.y * renderedHeight
+                (transform[0] * sourceX + transform[1] * sourceY + transform[2]) / denominator,
+                (transform[3] * sourceX + transform[4] * sourceY + transform[5]) / denominator
             )
         }
 
@@ -239,11 +247,17 @@ private fun SubjectOverlay(frameState: VisionFrameState?) {
     }
 }
 
-private fun VisionPoint.rotate(rotationDegrees: Int): VisionPoint = when (rotationDegrees) {
-    90 -> VisionPoint(1f - y, x)
-    180 -> VisionPoint(1f - x, 1f - y)
-    270 -> VisionPoint(y, 1f - x)
-    else -> this
+private fun ImageProxy.sourceToPreviewMatrix(
+    previewView: PreviewView,
+    imageTransformFactory: ImageProxyTransformFactory
+): FloatArray? {
+    val previewOutput = previewView.outputTransform ?: return null
+    val sourceOutput = imageTransformFactory.getOutputTransform(this)
+    return Matrix().apply {
+        CoordinateTransform(sourceOutput, previewOutput).transform(this)
+    }.let { matrix ->
+        FloatArray(9).also(matrix::getValues)
+    }
 }
 
 @Composable

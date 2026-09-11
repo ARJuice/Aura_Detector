@@ -81,7 +81,7 @@ Start with `yolo26n-seg.pt`: the nano instance-segmentation checkpoint is the fa
 - `gradle :app:assembleDebug` has now passed on the development machine.
 - The debug APK has been installed and the camera preview works over a private Windows hotspot; the college captive-portal network is not a supported transport network.
 - The physical phone now receives `frame_state` acknowledgements from the YOLO server over the hotspot. One observed round trip was 315 ms; this is a smoke-test observation, not a p50/p95 performance result.
-- Android now parses `frame_state.subjects` and projects normalized boxes/contours through source rotation and `FILL_CENTER` crop into a Canvas overlay. It renders a temporary `SUBJECT #id` label; physical alignment is still unmeasured.
+- Android now parses `frame_state.subjects` and projects normalized boxes/contours with CameraX's per-frame source-to-`PreviewView` transform into a Canvas overlay. It renders a temporary `SUBJECT #id` label; physical alignment is still unmeasured.
 
 ## 5. Data Boundaries
 

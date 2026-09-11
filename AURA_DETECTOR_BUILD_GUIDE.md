@@ -153,8 +153,8 @@ Use one custom Canvas layer for all per-frame drawing. Keep Compose out of the h
 
 ### Current implementation evidence
 
-- `AuraWebSocket` parses up to six current `frame_state.subjects` with normalized boxes and optional simplified contours, retaining each acknowledged frame's source size and rotation.
-- `ScannerScreen` projects those coordinates through the camera rotation and the `FILL_CENTER` crop model, then draws a Canvas outline/contour and `SUBJECT #id` label over the local preview.
+- `AuraWebSocket` parses up to six current `frame_state.subjects` with normalized boxes and optional simplified contours, retaining each acknowledged frame's source size and its CameraX source-to-preview transform.
+- `ScannerScreen` projects those coordinates through CameraX's exact per-frame `ImageProxy`-to-`PreviewView` transform, then draws a Canvas outline/contour and `SUBJECT #id` label over the local preview.
 - The debug APK compiles and is installed. A physical walking-person alignment check is still required before selection is added.
 
 Implement coordinate mapping once. The server frame and PreviewView may have different aspect ratios or rotation; map normalized source coordinates through the exact preview crop/rotation transform before drawing or hit-testing. Test portrait and landscape before spending time on effects.
