@@ -71,4 +71,4 @@ Show a compact card with base, one modifier, final result, and classification. T
 
 ## 6. Coordinate and Gesture Rules
 
-The renderer and hit-test layer use the same source-to-preview transform. The current baseline preserves the original analysis pixels for the server and caches the `PreviewView` transform on the UI thread; it must be physically validated before selection is built. A box is an acceptable temporary hit region if no valid contour is available. The eventual production mapping must apply preview crop, aspect ratio, rotation, and mirroring exactly once.
+The renderer and hit-test layer use the same source-to-preview transform. Apply preview crop, aspect ratio, rotation, and mirroring exactly once. A box is an acceptable temporary hit region if no valid contour is available.

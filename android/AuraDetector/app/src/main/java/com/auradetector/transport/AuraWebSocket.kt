@@ -43,15 +43,15 @@ data class VisionFrameState(
     val frameId: Long,
     val sourceWidth: Int,
     val sourceHeight: Int,
-    val sourceToPreview: FloatArray,
+    val rotationDegrees: Int,
     val subjects: List<VisionSubject>
 )
 
 private data class SentFrame(
     val id: Long,
-    val sourceWidth: Int,
-    val sourceHeight: Int,
-    val sourceToPreview: FloatArray
+    val width: Int,
+    val height: Int,
+    val rotationDegrees: Int
 )
 
 /**
@@ -117,14 +117,7 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
         )
     }
 
-    fun sendFrame(
-        jpeg: ByteArray,
-        width: Int,
-        height: Int,
-        sourceWidth: Int,
-        sourceHeight: Int,
-        sourceToPreview: FloatArray
-    ): Boolean {
+    fun sendFrame(jpeg: ByteArray, width: Int, height: Int, rotationDegrees: Int): Boolean {
         val now = SystemClock.elapsedRealtime()
         if (!helloAcknowledged.get() || now - lastFrameSentAtMs.get() < MIN_FRAME_INTERVAL_MS) return false
         if (!awaitingFrameState.compareAndSet(false, true)) return false
@@ -142,9 +135,7 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
             .put("jpeg", Base64.encodeToString(jpeg, Base64.NO_WRAP))
 
         val socket = webSocket
-        inFlightFrame.set(
-            SentFrame(id, sourceWidth, sourceHeight, sourceToPreview.copyOf())
-        )
+        inFlightFrame.set(SentFrame(id, width, height, rotationDegrees))
         if (socket == null || !socket.send(message.toString())) {
             inFlightFrame.set(null)
             awaitingFrameState.set(false)
@@ -173,9 +164,9 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
                     if (sentFrame?.id == id) {
                         _frameState.value = VisionFrameState(
                             frameId = id,
-                            sourceWidth = sentFrame.sourceWidth,
-                            sourceHeight = sentFrame.sourceHeight,
-                            sourceToPreview = sentFrame.sourceToPreview,
+                            sourceWidth = sentFrame.width,
+                            sourceHeight = sentFrame.height,
+                            rotationDegrees = sentFrame.rotationDegrees,
                             subjects = parseSubjects(message.optJSONArray("subjects"))
                         )
                     }

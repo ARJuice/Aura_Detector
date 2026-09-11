@@ -2,7 +2,6 @@ package com.auradetector.ui.screens
 
 import android.Manifest
 import android.content.Context
-import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.content.pm.PackageManager
@@ -19,9 +18,6 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.camera.view.transform.CoordinateTransform
-import androidx.camera.view.transform.ImageProxyTransformFactory
-import androidx.camera.view.transform.OutputTransform
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -58,7 +54,6 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.Observer
 import com.auradetector.data.ServerConfig
 import com.auradetector.transport.AuraWebSocket
 import com.auradetector.transport.TransportStatus
@@ -72,7 +67,6 @@ import com.auradetector.ui.theme.NeonGreen
 import com.auradetector.ui.theme.OrangeWarning
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicReference
 
 @Composable
 fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
@@ -117,30 +111,10 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val previewView = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER } }
     val analyzerExecutor = remember { Executors.newSingleThreadExecutor() }
-    val previewOutputTransform = remember { AtomicReference<OutputTransform?>(null) }
-    val imageTransformFactory = remember {
-        ImageProxyTransformFactory().apply {
-            setUsingCropRect(false)
-            setUsingRotationDegrees(false)
-        }
-    }
 
     DisposableEffect(lifecycleOwner, transport) {
-        val updatePreviewTransform = {
-            previewOutputTransform.set(previewView.outputTransform)
-        }
-        val layoutListener = android.view.View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            updatePreviewTransform()
-        }
-        val streamObserver = Observer<PreviewView.StreamState> {
-            updatePreviewTransform()
-        }
-        previewView.addOnLayoutChangeListener(layoutListener)
-        previewView.previewStreamState.observe(lifecycleOwner, streamObserver)
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-        var disposed = false
-        fun bindCamera() {
-            if (disposed) return
+        val bindCamera = Runnable {
             val cameraProvider = cameraProviderFuture.get()
             val preview = Preview.Builder().build().also {
                 it.surfaceProvider = previewView.surfaceProvider
@@ -152,20 +126,13 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
                 .also { imageAnalysis ->
                     imageAnalysis.setAnalyzer(analyzerExecutor) { image ->
                         try {
-                            image.sourceToPreviewMatrix(
-                                previewOutputTransform.get(),
-                                imageTransformFactory
-                            )?.let { transform ->
-                                val frame = image.toJpeg()
-                                transport.sendFrame(
-                                    jpeg = frame.bytes,
-                                    width = frame.width,
-                                    height = frame.height,
-                                    sourceWidth = image.width,
-                                    sourceHeight = image.height,
-                                    sourceToPreview = transform
-                                )
-                            }
+                            val frame = image.toJpeg()
+                            transport.sendFrame(
+                                frame.bytes,
+                                frame.width,
+                                frame.height,
+                                image.imageInfo.rotationDegrees
+                            )
                         } finally {
                             image.close()
                         }
@@ -180,13 +147,9 @@ private fun CameraTransportPreview(transport: AuraWebSocket) {
                 analysis
             )
         }
-        cameraProviderFuture.addListener(::bindCamera, ContextCompat.getMainExecutor(context))
+        cameraProviderFuture.addListener(bindCamera, ContextCompat.getMainExecutor(context))
 
         onDispose {
-            disposed = true
-            previewView.removeOnLayoutChangeListener(layoutListener)
-            previewView.previewStreamState.removeObserver(streamObserver)
-            previewOutputTransform.set(null)
             if (cameraProviderFuture.isDone) cameraProviderFuture.get().unbindAll()
             analyzerExecutor.shutdown()
         }
@@ -206,16 +169,21 @@ private fun SubjectOverlay(frameState: VisionFrameState?) {
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
+        val rotation = ((frameState.rotationDegrees % 360) + 360) % 360
+        val sourceWidth = if (rotation % 180 == 0) frameState.sourceWidth else frameState.sourceHeight
+        val sourceHeight = if (rotation % 180 == 0) frameState.sourceHeight else frameState.sourceWidth
+        val scale = maxOf(size.width / sourceWidth, size.height / sourceHeight)
+        val renderedWidth = sourceWidth * scale
+        val renderedHeight = sourceHeight * scale
+        val offsetX = (size.width - renderedWidth) / 2f
+        val offsetY = (size.height - renderedHeight) / 2f
         val strokeWidth = 3.dp.toPx()
 
         fun project(point: VisionPoint): Offset {
-            val sourceX = point.x * frameState.sourceWidth
-            val sourceY = point.y * frameState.sourceHeight
-            val transform = frameState.sourceToPreview
-            val denominator = transform[6] * sourceX + transform[7] * sourceY + transform[8]
+            val rotated = point.rotate(rotation)
             return Offset(
-                (transform[0] * sourceX + transform[1] * sourceY + transform[2]) / denominator,
-                (transform[3] * sourceX + transform[4] * sourceY + transform[5]) / denominator
+                offsetX + rotated.x * renderedWidth,
+                offsetY + rotated.y * renderedHeight
             )
         }
 
@@ -271,17 +239,11 @@ private fun SubjectOverlay(frameState: VisionFrameState?) {
     }
 }
 
-private fun ImageProxy.sourceToPreviewMatrix(
-    previewOutput: OutputTransform?,
-    imageTransformFactory: ImageProxyTransformFactory
-): FloatArray? {
-    previewOutput ?: return null
-    val sourceOutput = imageTransformFactory.getOutputTransform(this)
-    return Matrix().apply {
-        CoordinateTransform(sourceOutput, previewOutput).transform(this)
-    }.let { matrix ->
-        FloatArray(9).also(matrix::getValues)
-    }
+private fun VisionPoint.rotate(rotationDegrees: Int): VisionPoint = when (rotationDegrees) {
+    90 -> VisionPoint(1f - y, x)
+    180 -> VisionPoint(1f - x, 1f - y)
+    270 -> VisionPoint(y, 1f - x)
+    else -> this
 }
 
 @Composable

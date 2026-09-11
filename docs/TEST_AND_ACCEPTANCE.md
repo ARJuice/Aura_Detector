@@ -50,8 +50,8 @@ Network prerequisite: run the transport test on a direct private hotspot as well
 | Android compilation | Passed | `gradle :app:assembleDebug` completed successfully after fixing project configuration and Kotlin/Compose errors. |
 | Android installation | Passed | Debug APK installs on the authorized phone. |
 | Latest-frame transport | Passed for private hotspot | Phone camera opens and reaches the PC over the Windows hotspot; malformed full-resolution frames are prevented by client-side downsampling. |
-| Vision | Metadata loop passed; person-track acceptance pending | The shared-viewport/crop/rotation experiment was reverted after it regressed detector behavior. The current full-frame baseline reached `LINK: OK`, `FRAME: 17`, and 271 ms without a camera-process crash. This is not a performance result. Walk one person in view and record stable ID, normalized box/contour, and inference time. |
-| Overlay | Baseline built and installed; manual acceptance pending | Phone preserves the original analysis image and uses a UI-thread-cached CameraX transform for the Canvas overlay. Verify a person box follows the preview in portrait, then rotate to landscape and check again. |
+| Vision | Metadata loop passed; person-track acceptance pending | Phone received `LINK: OK` through the known-working downsampled source-frame path (`FRAME: 17`, 315 ms). This is not a performance result. Walk one person in view and record stable ID, normalized box/contour, and inference time. |
+| Overlay | Baseline built and installed; manual acceptance pending | Phone parses frame-state subjects and draws a rotation/crop-aware Canvas overlay. Verify a person box follows the preview in portrait, then rotate to landscape and check again. |
 
 ## 4. Performance Measurement
 
