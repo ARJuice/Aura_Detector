@@ -23,6 +23,7 @@
 - The camera preview dominates the screen.
 - The overlay layer draws subject auras, labels, reticles, and scan transitions.
 - Compose HUD elements show connection state, active count, field text, mute control, and the result card.
+- The native Android action bar is disabled; settings and scanner headings are Compose UI only, so the system does not add a separate `AUR/S` header.
 
 ## 2. Interaction Model
 
