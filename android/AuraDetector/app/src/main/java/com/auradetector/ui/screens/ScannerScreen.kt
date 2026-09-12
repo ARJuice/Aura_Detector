@@ -7,7 +7,9 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.media.MediaPlayer
 import android.media.ToneGenerator
+import com.auradetector.R
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -236,16 +238,38 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
             val proximityMultiplier = (maxProximityArea * 2.2f).coerceIn(0.05f, 1.5f)
             val effectiveField = (totalIntensity * 0.15f * proximityMultiplier).toLong()
 
-            val delayMs = when {
-                effectiveField <= 300L -> 850L
-                effectiveField <= 3000L -> 450L
-                effectiveField <= 15000L -> 220L
-                effectiveField <= 35000L -> 100L
-                else -> 40L
-            }
+            val checkInterference = if (subjects.size == 2) {
+                val s1 = subjects[0]
+                val s2 = subjects[1]
+                val dist = kotlin.math.hypot(
+                    (s1.x + s1.width / 2f) - (s2.x + s2.width / 2f),
+                    (s1.y + s1.height / 2f) - (s2.y + s2.height / 2f)
+                )
+                var totalVal = 0L
+                for (s in subjects) {
+                    val prof = s.profile
+                    if (prof != null) {
+                        if (prof.max == "∞") totalVal += 500_000L
+                        else totalVal += (prof.max.toLongOrNull() ?: 5000L)
+                    }
+                }
+                dist < 0.28f && (totalVal >= 150_000L || totalIntensity >= 120_000L)
+            } else false
 
-            feedback.geigerTick(soundEnabled)
-            delay(delayMs)
+            if (checkInterference) {
+                feedback.playEmergencyInterferenceSound(soundEnabled)
+                delay(130)
+            } else {
+                val delayMs = when {
+                    effectiveField <= 300L -> 850L
+                    effectiveField <= 3000L -> 450L
+                    effectiveField <= 15000L -> 220L
+                    effectiveField <= 35000L -> 100L
+                    else -> 40L
+                }
+                feedback.geigerTick(soundEnabled)
+                delay(delayMs)
+            }
         }
     }
 
@@ -303,8 +327,7 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
     LaunchedEffect(scanResult) {
         val res = scanResult
         if (res != null) {
-            val isJackpot = res.rawBonusNumber == "∞" || res.rawBonusNumber == "696969" || res.rawBonusNumber == "676767"
-            feedback.playBonusMemeSound(res.isPositive, isJackpot, latestSoundEnabled.value)
+            feedback.playResultAudio(res, latestSoundEnabled.value)
             
             val projected = frameState?.let { projectSubjects(it) }?.firstOrNull { it.subject.id == scanningSubjectId }
             val cx = projected?.box?.center?.x ?: 500f
@@ -358,9 +381,7 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
                 val subjectId = scanningSubjectId ?: return@ScanOverlay
                 val newResult = scanGenerators.getOrPut(subjectId) { AuraScanGenerator(subjectId) }.rollBonus(current)
                 scanResult = newResult
-                
-                val isJackpot = newResult.rawBonusNumber == "∞" || newResult.rawBonusNumber == "696969" || newResult.rawBonusNumber == "676767"
-                feedback.playBonusMemeSound(newResult.isPositive, isJackpot, latestSoundEnabled.value)
+                feedback.playResultAudio(newResult, latestSoundEnabled.value)
                 
                 val projected = frameState?.let { projectSubjects(it) }?.firstOrNull { it.subject.id == subjectId }
                 val cx = projected?.box?.center?.x ?: 500f
@@ -370,6 +391,27 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
             }
         )
         
+        val isInterference = remember(frameState) {
+            val subjects = frameState?.subjects.orEmpty()
+            if (subjects.size == 2) {
+                val s1 = subjects[0]
+                val s2 = subjects[1]
+                val dx = (s1.x + s1.width / 2f) - (s2.x + s2.width / 2f)
+                val dy = (s1.y + s1.height / 2f) - (s2.y + s2.height / 2f)
+                val dist = kotlin.math.hypot(dx, dy)
+
+                var totalVal = 0L
+                for (s in subjects) {
+                    val prof = s.profile
+                    if (prof != null) {
+                        if (prof.max == "∞") totalVal += 500_000L
+                        else totalVal += (prof.max.toLongOrNull() ?: 5000L)
+                    }
+                }
+                dist < 0.28f && totalVal >= 150_000L
+            } else false
+        }
+
         val subjectCount = frameState?.subjects?.size ?: 0
         val selectedSubjectProfile = frameState?.subjects?.firstOrNull { it.id == selectedSubjectId }?.profile
         val hudSubjectColor = selectedSubjectProfile?.palette?.let { paletteColor(it) } ?: NeonGreen
@@ -386,6 +428,7 @@ fun ScannerScreen(config: ServerConfig, onExit: () -> Unit) {
             },
             soundEnabled = soundEnabled,
             frameState = frameState,
+            isInterference = isInterference,
             subjectCount = subjectCount,
             subjectColor = hudSubjectColor,
             onToggleSound = { soundEnabled = !soundEnabled }
@@ -732,6 +775,50 @@ private fun SubjectOverlay(
             }
         }
 
+        if (projectedSubjects.size == 2) {
+            val p1 = projectedSubjects[0]
+            val p2 = projectedSubjects[1]
+            val c1 = p1.box.center
+            val c2 = p2.box.center
+            val distancePx = kotlin.math.hypot(c1.x - c2.x, c1.y - c2.y)
+
+            var totalAura = 0L
+            for (proj in projectedSubjects) {
+                val prof = proj.subject.profile
+                if (prof != null) {
+                    if (prof.max == "∞") totalAura += 500_000L
+                    else totalAura += (prof.max.toLongOrNull() ?: 5000L)
+                }
+            }
+
+            val maxInterferenceDistance = minOf(size.width, size.height) * 0.28f
+            if (distancePx < maxInterferenceDistance && totalAura >= 150_000L) {
+                val numSegments = 6
+                val lightningPath = Path().apply {
+                    moveTo(c1.x, c1.y)
+                    for (i in 1 until numSegments) {
+                        val frac = i.toFloat() / numSegments
+                        val midX = c1.x + (c2.x - c1.x) * frac
+                        val midY = c1.y + (c2.y - c1.y) * frac
+                        val jitterX = Random.nextFloat() * 24.dp.toPx() - 12.dp.toPx()
+                        val jitterY = Random.nextFloat() * 24.dp.toPx() - 12.dp.toPx()
+                        lineTo(midX + jitterX, midY + jitterY)
+                    }
+                    lineTo(c2.x, c2.y)
+                }
+
+                drawPath(lightningPath, Color(0xFFFF0055), style = CanvasStroke(width = 6.dp.toPx(), cap = StrokeCap.Round))
+                drawPath(lightningPath, AuraWhiteHot, style = CanvasStroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+
+                particleSystem.burst(
+                    (c1.x + c2.x) / 2f,
+                    (c1.y + c2.y) / 2f,
+                    4,
+                    Color(0xFFFF0055)
+                )
+            }
+        }
+
         particleSystem.spawnAmbient(projectedSubjects)
         with(particleSystem) {
             drawParticles()
@@ -889,8 +976,9 @@ private data class AuraScanResult(
     val rawBonusNumber: String? = null
 )
 
-private class ScanFeedback(context: Context) {
+private class ScanFeedback(private val context: Context) {
     private val toneGenerator = ToneGenerator(AudioManager.STREAM_MUSIC, 55)
+    private var activeMediaPlayer: MediaPlayer? = null
     private val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         context.getSystemService(VibratorManager::class.java)?.defaultVibrator
     } else {
@@ -908,8 +996,100 @@ private class ScanFeedback(context: Context) {
         if (soundEnabled) toneGenerator.startTone(ToneGenerator.TONE_PROP_ACK, 250)
     }
 
+    fun playResultAudio(result: AuraScanResult, soundEnabled: Boolean) {
+        playBonusMemeSound(
+            rawBonusNumber = result.rawBonusNumber,
+            isPositive = result.isPositive,
+            finalText = result.final,
+            soundEnabled = soundEnabled
+        )
+    }
+
     fun playBonusMemeSound(isPositive: Boolean, isJackpot: Boolean, soundEnabled: Boolean) {
+        playBonusMemeSound(rawBonusNumber = null, isPositive = isPositive, finalText = null, soundEnabled = soundEnabled)
+    }
+
+    fun playBonusMemeSound(
+        rawBonusNumber: String?,
+        isPositive: Boolean,
+        finalText: String?,
+        soundEnabled: Boolean
+    ) {
         if (!soundEnabled) return
+
+        val resId = getCustomSoundResId(rawBonusNumber, isPositive, finalText)
+        if (resId != null) {
+            try {
+                try {
+                    activeMediaPlayer?.let {
+                        if (it.isPlaying) it.stop()
+                        it.release()
+                    }
+                } catch (_: Exception) {}
+                activeMediaPlayer = null
+
+                val mp = MediaPlayer.create(context, resId)
+                if (mp != null) {
+                    activeMediaPlayer = mp
+                    mp.setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_GAME)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    )
+                    mp.setOnCompletionListener { player ->
+                        try {
+                            player.release()
+                        } catch (_: Exception) {}
+                        if (activeMediaPlayer == player) {
+                            activeMediaPlayer = null
+                        }
+                    }
+                    mp.start()
+                    return
+                }
+            } catch (e: Exception) {
+                Log.w("AuraDetector", "Error playing custom sound res: $resId", e)
+            }
+        }
+
+        val isJackpot = rawBonusNumber == "∞" || rawBonusNumber == "696969" || rawBonusNumber == "676767"
+        playSynthesizedMemeSound(isPositive, isJackpot)
+    }
+
+    private fun getCustomSoundResId(rawBonusNumber: String?, isPositive: Boolean, finalText: String?): Int? {
+        val num = rawBonusNumber?.trim()
+        val text = finalText.orEmpty()
+
+        if (num == "0" || text.startsWith("0 ") || text.contains(" 0 AUR") || text.endsWith("0")) {
+            return R.raw.sound_0
+        }
+
+        if (!isPositive && (num == "676767" || num == "696969" || text.contains("-676767") || text.contains("−676767") || text.contains("-696969") || text.contains("−696969"))) {
+            return R.raw.minus_676767_696969
+        }
+
+        if (num == "69" && !isPositive) return R.raw.minus_69
+        if (text.contains("-69") || text.contains("−69")) return R.raw.minus_69
+
+        if (num == "676767" || num == "696969" || num == "67" || (num == "69" && isPositive) || text.contains("676767") || text.contains("696969")) {
+            return R.raw.sound_676767_696969
+        }
+
+        if (num == "100000" || text.contains("100000")) return R.raw.sound_100000
+        if (num == "50000" || text.contains("50000")) return R.raw.sound_50000
+        if (num == "1000" || num == "5000" || text.contains("1000") || text.contains("5000")) {
+            return R.raw.sound_1000_5000
+        }
+
+        if (num == "∞" || text.contains("∞") || text.contains("infinity")) {
+            return R.raw.minus_infinity
+        }
+
+        return null
+    }
+
+    private fun playSynthesizedMemeSound(isPositive: Boolean, isJackpot: Boolean) {
         try {
             val sampleRate = 22050
             val durationMs = if (isJackpot) 750 else 420
@@ -976,7 +1156,26 @@ private class ScanFeedback(context: Context) {
         toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 18)
     }
 
-    fun release() = toneGenerator.release()
+    fun playEmergencyInterferenceSound(soundEnabled: Boolean) {
+        if (!soundEnabled) return
+        vibrate(longArrayOf(0, 35, 30, 35), -1)
+        try {
+            toneGenerator.startTone(ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 120)
+        } catch (_: Exception) {
+            toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP2, 120)
+        }
+    }
+
+    fun release() {
+        toneGenerator.release()
+        try {
+            activeMediaPlayer?.let {
+                if (it.isPlaying) it.stop()
+                it.release()
+            }
+        } catch (_: Exception) {}
+        activeMediaPlayer = null
+    }
 
     private fun vibrate(pattern: LongArray, repeat: Int) {
         val device = vibrator ?: return
@@ -994,24 +1193,27 @@ private class AuraScanGenerator(subjectId: Long) {
     private val random = Random(subjectId.toInt() xor 0x51A7C0DE)
 
     fun initialScan(): AuraScanResult {
-        // 1 in 10 chance (10%) to get one of the special meme aura values
-        val isSpecialRoll = random.nextDouble() < 0.10
+        // 45% chance to roll a special meme/audio aura value
+        val isSpecialRoll = random.nextDouble() < 0.45
         val isPositive = random.nextDouble() < 0.60 // 60% positive / 40% negative
         val signStr = if (isPositive) "+" else "−"
 
         if (isSpecialRoll) {
-            val specialValues = listOf("∞", "100000", "5000", "1000", "67", "69", "1", "0")
+            val specialValues = listOf("∞", "100000", "50000", "5000", "1000", "676767", "696969", "67", "69", "0")
             val chosen = specialValues[random.nextInt(specialValues.size)]
             val formattedVal = if (chosen == "0") "0 AUR/s" else "$signStr$chosen AUR/s"
 
             val classification = when (chosen) {
                 "∞" -> if (isPositive) "INFINITE OVERFLOW" else "VOID SINGULARITY"
                 "100000" -> if (isPositive) "CRITICAL PEAK RADIANCE" else "CRITICAL DRAIN"
+                "50000" -> if (isPositive) "HIGH PULSE RADIANCE" else "HIGH FIELD COLLAPSE"
                 "5000" -> if (isPositive) "HIGH ENERGY PULSE" else "FIELD COLLAPSE"
                 "1000" -> if (isPositive) "STABLE HARMONIC" else "HARMONIC DRAIN"
+                "676767" -> if (isPositive) "SUPREME SPECTRUM 67" else "CATACLYSMIC DRAIN 67"
+                "696969" -> if (isPositive) "NICE OVERDRIVE 69" else "NICE CURSE DRAIN 69"
                 "67" -> if (isPositive) "RESONANCE SIGNAL 67" else "CURSE SIGNAL 67"
                 "69" -> if (isPositive) "NICE SPECTRUM 69" else "NICE DRAIN 69"
-                "1" -> if (isPositive) "SOLITARY TRACE" else "SOLITARY DRAIN"
+                "0" -> "ZERO AURA HARMONY"
                 else -> "NULL FIELD READOUT"
             }
 
@@ -1039,22 +1241,27 @@ private class AuraScanGenerator(subjectId: Long) {
     }
 
     fun rollBonus(currentResult: AuraScanResult): AuraScanResult {
-        // 40% Curse (Negative) / 60% Blessing (Positive) split per user specification
+        // 40% Curse (Negative) / 60% Blessing (Positive) split
         val isPositive = random.nextDouble() < 0.60
 
-        // Strict fixed set: 67, 696969, ∞, 676767, 100000, 1
-        val fixedValues = listOf("67", "696969", "∞", "676767", "100000", "1")
+        // Preferred set matching custom audio files
+        val fixedValues = listOf("696969", "676767", "100000", "50000", "5000", "1000", "69", "67", "0", "∞")
         val chosenValueStr = fixedValues[random.nextInt(fixedValues.size)]
 
         val signStr = if (isPositive) "+" else "−"
-        val bonusFormatted = "$signStr$chosenValueStr AURA"
+        val bonusFormatted = if (chosenValueStr == "0") "0 AURA" else "$signStr$chosenValueStr AURA"
 
         val classification = when (chosenValueStr) {
             "∞" -> if (isPositive) "INFINITE OVERFLOW" else "VOID SINGULARITY"
             "696969" -> if (isPositive) "NICE OVERDRIVE (+696969)" else "NICE CURSE DRAIN (−696969)"
             "676767" -> if (isPositive) "SUPREME SPECTRUM (+676767)" else "CATACLYSMIC DRAIN (−676767)"
             "100000" -> if (isPositive) "MAJOR RADIANCE (+100000)" else "MAJOR FIELD DRAIN (−100000)"
+            "50000" -> if (isPositive) "HIGH PULSE RADIANCE (+50000)" else "HIGH FIELD COLLAPSE (−50000)"
+            "5000" -> if (isPositive) "PULSE SPECTRUM (+5000)" else "PULSE DRAIN (−5000)"
+            "1000" -> if (isPositive) "HARMONIC BOOST (+1000)" else "HARMONIC DRAIN (−1000)"
+            "69" -> if (isPositive) "NICE SPECTRUM (+69)" else "NICE DRAIN (−69)"
             "67" -> if (isPositive) "BONUS FIELD (+67)" else "FIELD CURSE (−67)"
+            "0" -> "ZERO AURA BALANCE"
             else -> if (isPositive) "SOLITARY AURA (+1)" else "SINGLE DROP CURSE (−1)"
         }
 
@@ -1363,6 +1570,7 @@ private fun ScannerHud(
     scanStatus: String?,
     soundEnabled: Boolean,
     frameState: VisionFrameState?,
+    isInterference: Boolean,
     subjectCount: Int,
     subjectColor: Color,
     onToggleSound: () -> Unit
@@ -1480,11 +1688,46 @@ private fun ScannerHud(
             )
         }
 
+        // AURA INTERFERENCE WARNING BANNER OVERLAY
+        if (isInterference) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 74.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color(0xFF880022).copy(alpha = 0.92f), DarkNavy.copy(alpha = 0.95f))
+                        ),
+                        shape = CutCornerShape(8.dp)
+                    )
+                    .border(1.5.dp, Color(0xFFFF0055), shape = CutCornerShape(8.dp))
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "⚠ AURA INTERFERENCE ⚠",
+                        color = AuraWhiteHot,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 14.sp
+                    )
+                    Text(
+                        "RESONANCE OVERLOAD BETWEEN SUBJECTS",
+                        color = Color(0xFFFF6699),
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+        }
+
         // BOTTOM-LEFT GEIGER FLUX COUNTER & SPECTRAL GRAPH WIDGET
         GeigerFluxMeter(
             frameState = frameState,
             selectedSubjectId = selectedSubjectId,
             liveReading = liveReading,
+            isInterference = isInterference,
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .navigationBarsPadding()
@@ -1512,42 +1755,47 @@ private fun GeigerFluxMeter(
     frameState: VisionFrameState?,
     selectedSubjectId: Long?,
     liveReading: String?,
+    isInterference: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val targetCpm = remember(frameState, selectedSubjectId, liveReading) {
-        var base = Random.nextInt(18, 36)
-        val subjects = frameState?.subjects.orEmpty()
-        if (subjects.isNotEmpty()) {
-            var totalAuraSum = 0L
-            var maxProximityArea = 0.05f
+    val targetCpm = remember(frameState, selectedSubjectId, liveReading, isInterference) {
+        if (isInterference) {
+            99999
+        } else {
+            var base = Random.nextInt(18, 36)
+            val subjects = frameState?.subjects.orEmpty()
+            if (subjects.isNotEmpty()) {
+                var totalAuraSum = 0L
+                var maxProximityArea = 0.05f
 
-            for (subj in subjects) {
-                val area = subj.width * subj.height
-                if (area > maxProximityArea) maxProximityArea = area
+                for (subj in subjects) {
+                    val area = subj.width * subj.height
+                    if (area > maxProximityArea) maxProximityArea = area
 
-                val profile = subj.profile ?: continue
-                val minVal = profile.min.toDoubleOrNull() ?: 100.0
-                val maxVal = if (profile.max == "∞") 100_000.0 else profile.max.toDoubleOrNull() ?: 5000.0
-                val avgVal = (minVal + maxVal) / 2.0
-                totalAuraSum += avgVal.toLong()
-            }
-
-            if (selectedSubjectId != null && liveReading != null) {
-                if (liveReading.contains("∞")) {
-                    totalAuraSum += 50_000L
-                } else {
-                    val rawVal = liveReading.replace(",", "").replace(" AUR/s", "")
-                        .replace("+", "").replace("−", "").replace(" AURA", "").trim().toLongOrNull() ?: 0L
-                    totalAuraSum += rawVal
+                    val profile = subj.profile ?: continue
+                    val minVal = profile.min.toDoubleOrNull() ?: 100.0
+                    val maxVal = if (profile.max == "∞") 100_000.0 else profile.max.toDoubleOrNull() ?: 5000.0
+                    val avgVal = (minVal + maxVal) / 2.0
+                    totalAuraSum += avgVal.toLong()
                 }
+
+                if (selectedSubjectId != null && liveReading != null) {
+                    if (liveReading.contains("∞")) {
+                        totalAuraSum += 50_000L
+                    } else {
+                        val rawVal = liveReading.replace(",", "").replace(" AUR/s", "")
+                            .replace("+", "").replace("−", "").replace(" AURA", "").trim().toLongOrNull() ?: 0L
+                        totalAuraSum += rawVal
+                    }
+                }
+
+                val proximityMultiplier = (maxProximityArea * 2.2f).coerceIn(0.05f, 1.5f)
+                val scaledAuraField = (totalAuraSum * 0.15f * proximityMultiplier).toInt()
+
+                base += scaledAuraField.coerceAtMost(99999)
             }
-
-            val proximityMultiplier = (maxProximityArea * 2.2f).coerceIn(0.05f, 1.5f)
-            val scaledAuraField = (totalAuraSum * 0.15f * proximityMultiplier).toInt()
-
-            base += scaledAuraField.coerceAtMost(99999)
+            base
         }
-        base
     }
 
     val animatedCpm = remember { Animatable(24f) }
@@ -1575,7 +1823,9 @@ private fun GeigerFluxMeter(
     val currentCpmInt = animatedCpm.value.toInt()
     val uSvRate = (currentCpmInt / 120.0)
 
-    val (statusText, statusColor) = when {
+    val (statusText, statusColor) = if (isInterference) {
+        "⚠ AURA INTERFERENCE" to Color(0xFFFF0055)
+    } else when {
         currentCpmInt > 40000 -> "☢ CRITICAL OVERFLOW" to ErrorRed
         currentCpmInt > 12000 -> "⚡ FLUX SPIKE" to OrangeWarning
         currentCpmInt > 1200 -> "▲ ELEVATED FIELD" to NeonGreen

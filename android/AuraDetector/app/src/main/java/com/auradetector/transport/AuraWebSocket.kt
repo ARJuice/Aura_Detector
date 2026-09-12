@@ -134,7 +134,13 @@ class AuraWebSocket(private val config: ServerConfig) : Closeable {
         sourceToPreview: FloatArray
     ): Boolean {
         val now = SystemClock.elapsedRealtime()
-        if (!helloAcknowledged.get() || now - lastFrameSentAtMs.get() < MIN_FRAME_INTERVAL_MS) return false
+        val currentLatency = _status.value.latencyMs ?: 0L
+        val dynamicIntervalMs = when {
+            currentLatency > 200L -> 150L // ~6.6 FPS if server is heavily loaded
+            currentLatency > 100L -> 120L // ~8.3 FPS if server is under load
+            else -> 90L                    // ~11 FPS optimal smooth target
+        }
+        if (!helloAcknowledged.get() || now - lastFrameSentAtMs.get() < dynamicIntervalMs) return false
         if (!awaitingFrameState.compareAndSet(false, true)) return false
 
         val id = frameId.incrementAndGet()
